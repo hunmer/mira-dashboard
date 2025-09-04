@@ -1,0 +1,1284 @@
+<template>
+  <div class="plugin-manager ">
+    <!-- 总体统计卡片 -->
+    <div class="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8 ">
+      <div class="stats-card total-plugins">
+        <div class="stats-content">
+          <div class="stats-icon">🔧</div>
+          <div class="stats-info">
+            <h3>总插件数</h3>
+            <p class="stats-number">{{ totalPluginsCount }}</p>
+          </div>
+        </div>
+      </div>
+      
+      <div class="stats-card active-plugins">
+        <div class="stats-content">
+          <div class="stats-icon">✅</div>
+          <div class="stats-info">
+            <h3>已启用</h3>
+            <p class="stats-number">{{ activePluginsCount }}</p>
+          </div>
+        </div>
+      </div>
+      
+      <div class="stats-card inactive-plugins">
+        <div class="stats-content">
+          <div class="stats-icon">❌</div>
+          <div class="stats-info">
+            <h3>已禁用</h3>
+            <p class="stats-number">{{ inactivePluginsCount }}</p>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- 资源库标签页 -->
+    <div class="library-tabs">
+      <div class="tab-nav">
+        <button
+          v-for="library in librariesWithPlugins"
+          :key="library.id"
+          :class="[
+            'tab-button',
+            { 'active': activeLibraryTab === library.id }
+          ]"
+          @click="activeLibraryTab = library.id"
+        >
+          {{ library.name || library.id }}
+          <span class="tab-count">{{ library.plugins.length }}</span>
+        </button>
+      </div>
+
+      <!-- 当前库的插件内容 -->
+      <div v-for="library in librariesWithPlugins" :key="library.id" class="tab-content">
+        <div v-if="activeLibraryTab === library.id">
+          <!-- 控制栏背景 -->
+          <div class="flex flex-wrap gap-4 mb-6 p-4 rounded-lg">
+            <div class="relative flex-1 min-w-64">
+              <div class="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
+                <svg class="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"></path>
+                </svg>
+              </div>
+              <input
+                v-model="searchKeywords[library.id]"
+                type="text"
+                placeholder="搜索插件名称、作者或描述"
+                class="block w-full pl-10 pr-3 py-2 border border-gray-300 rounded-md leading-5 placeholder-gray-500 focus:outline-none focus:placeholder-gray-400 focus:ring-1 focus:ring-blue-500 focus:border-blue-500"
+                @input="handleSearch(library.id)"
+              />
+            </div>
+            
+            <select
+              v-model="sortOptions[library.id]"
+              class="block px-3 py-2 border border-gray-300 rounded-md leading-5 focus:outline-none focus:ring-1 focus:ring-blue-500 focus:border-blue-500"
+              @change="handleSort(library.id)"
+            >
+              <option value="status">启用状态</option>
+              <option value="name">名称</option>
+              <option value="author">作者</option>
+              <option value="createdAt">安装时间</option>
+              <option value="category">分类</option>
+            </select>
+            
+            <select
+              v-model="categoryFilters[library.id]"
+              class="block px-3 py-2 border border-gray-300 rounded-md leading-5 focus:outline-none focus:ring-1 focus:ring-blue-500 focus:border-blue-500"
+              @change="handleFilter(library.id)"
+            >
+              <option value="">全部分类</option>
+              <option
+                v-for="category in getAvailableCategories(library.plugins)"
+                :key="category"
+                :value="category"
+              >
+                {{ getCategoryDisplayName(category) }}
+              </option>
+            </select>
+            
+            <button
+              type="button"
+              @click="openInstallDialog(library.id)"
+              class="inline-flex items-center px-4 py-2 border border-transparent text-sm font-medium rounded-md text-white bg-blue-600 hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500"
+            >
+              <svg class="-ml-1 mr-2 h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"></path>
+              </svg>
+              安装插件
+            </button>
+          </div>
+
+          <!-- 当前库插件统计 -->
+          <div class="flex gap-4 mb-6">
+            <div class="library-stat">
+              <div class="stat-title">插件数量</div>
+              <div class="stat-value">{{ library.plugins.length }}</div>
+            </div>
+            <div class="library-stat">
+              <div class="stat-title">已启用</div>
+              <div class="stat-value">{{ getActiveCount(library.plugins) }}</div>
+            </div>
+            <div class="library-stat">
+              <div class="stat-title">已禁用</div>
+              <div class="stat-value">{{ getInactiveCount(library.plugins) }}</div>
+            </div>
+          </div>
+
+          <!-- 插件网格视图 -->
+          <div v-if="loading && library.plugins.length === 0" class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
+            <div v-for="i in 8" :key="i" class="plugin-skeleton">
+              <div class="animate-pulse">
+                <div class="flex items-center space-x-4 mb-4">
+                  <div class="w-10 h-10 rounded-lg"></div>
+                  <div class="flex-1">
+                    <div class="h-4 rounded w-3/4 mb-2"></div>
+                    <div class="h-3 rounded w-1/2"></div>
+                  </div>
+                  <div class="w-12 h-6 rounded"></div>
+                </div>
+                <div class="space-y-2">
+                  <div class="h-3 rounded"></div>
+                  <div class="h-3 rounded w-5/6"></div>
+                </div>
+                <div class="flex justify-between mt-4">
+                  <div class="h-6 rounded w-12"></div>
+                  <div class="h-6 rounded w-12"></div>
+                </div>
+              </div>
+            </div>
+          </div>
+          
+          <div v-else class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
+            <div
+              v-for="plugin in getFilteredPlugins(library)"
+              :key="plugin.name"
+              :class="[
+                'plugin-card transition-all duration-200 cursor-pointer',
+                {
+                  'border-green-200': plugin.status === 'active',
+                  'border-gray-200': plugin.status === 'inactive'
+                }
+              ]"
+            >
+              <div class="plugin-header flex items-center justify-between mb-4">
+                <div class="flex items-center">
+                  <div class="w-10 h-10 mr-3 flex items-center justify-center rounded-lg">
+                    <img
+                      v-if="plugin.icon"
+                      :src="plugin.icon"
+                      :alt="plugin.name"
+                      class="w-8 h-8 object-contain"
+                      @error="handleIconError"
+                    />
+                    <span v-else class="text-xl">🔧</span>
+                  </div>
+                  <div>
+                    <h3 class="font-semibold text-lg truncate">{{ plugin.name }}</h3>
+                    <p class="text-sm">v{{ plugin.version }}</p>
+                  </div>
+                </div>
+                <label class="switch">
+                  <input
+                    type="checkbox"
+                    :checked="plugin.status === 'active'"
+                    @change="(e) => togglePlugin(plugin, (e.target as HTMLInputElement).checked)"
+                  />
+                  <span class="slider"></span>
+                </label>
+              </div>
+
+              <p class="text-sm mb-4 line-clamp-2">
+                {{ plugin.description || '暂无描述' }}
+              </p>
+
+              <div class="plugin-info space-y-2 mb-4">
+                <div class="flex justify-between text-sm">
+                  <span>作者:</span>
+                  <span class="truncate ml-2">{{ plugin.author }}</span>
+                </div>
+                <div class="flex justify-between text-sm">
+                  <span>分类:</span>
+                  <span class="px-2 py-1 text-xs rounded">{{ getCategoryDisplayName(plugin.category) }}</span>
+                </div>
+              </div>
+
+              <div class="plugin-actions flex gap-2 mt-auto">
+                <button
+                  type="button"
+                  @click="showPluginDetail(plugin)"
+                  class="flex-1 px-3 py-2 text-sm text-white rounded hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                >
+                  详情
+                </button>
+                
+                <button
+                  v-if="plugin.configurable"
+                  type="button"
+                  @click="configurePlugin(plugin)"
+                  class="px-3 py-2 text-sm text-white rounded hover:bg-gray-700 focus:outline-none focus:ring-2 focus:ring-gray-500"
+                >
+                  配置
+                </button>
+                
+                <div class="relative">
+                  <button
+                    type="button"
+                    @click="toggleDropdown(plugin.name)"
+                    class="px-3 py-2 text-sm rounded focus:outline-none focus:ring-2"
+                  >
+                    更多
+                    <svg class="w-3 h-3 ml-1 inline" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"></path>
+                    </svg>
+                  </button>
+                  
+                  <div
+                    v-if="activeDropdown === plugin.name"
+                    class="absolute right-0 mt-1 w-32 border border-gray-200 rounded-md shadow-lg z-10"
+                  >
+                    <button
+                      @click="handlePluginAction('update', plugin)"
+                      class="block w-full text-left px-4 py-2 text-sm"
+                    >
+                      更新
+                    </button>
+                    <hr class="border-gray-100">
+                    <button
+                      @click="handlePluginAction('uninstall', plugin)"
+                      class="block w-full text-left px-4 py-2 text-sm"
+                    >
+                      卸载
+                    </button>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <!-- 空状态 -->
+          <div v-if="!loading && getFilteredPlugins(library).length === 0" class="text-center py-12">
+            <div class="text-4xl mb-4">🔧</div>
+            <p class="text-lg font-medium mb-2">
+              {{ (searchKeywords[library.id] || categoryFilters[library.id]) ? '没有找到匹配的插件' : '暂无插件' }}
+            </p>
+            <p class="text-sm">
+              {{ (searchKeywords[library.id] || categoryFilters[library.id]) ? '请尝试调整搜索条件' : '点击"安装插件"开始添加' }}
+            </p>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- 插件详情侧边面板 -->
+    <div v-if="showDetailDrawer" class="fixed inset-0 bg-gray-600 bg-opacity-50 overflow-y-auto h-full w-full z-50">
+      <div class="relative top-0 right-0 w-96 h-full shadow-lg ml-auto">
+        <div class="p-6">
+          <div class="flex justify-between items-center mb-6">
+            <h2 class="text-xl font-bold">插件详细信息</h2>
+            <button
+              @click="showDetailDrawer = false"
+              class="focus:outline-none"
+            >
+              <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path>
+              </svg>
+            </button>
+          </div>
+
+          <div v-if="selectedPlugin" class="plugin-detail">
+            <div class="text-center mb-6">
+              <div class="w-16 h-16 mx-auto mb-4 flex items-center justify-center rounded-lg">
+                <img
+                  v-if="selectedPlugin.icon"
+                  :src="selectedPlugin.icon"
+                  :alt="selectedPlugin.name"
+                  class="w-12 h-12 object-contain"
+                  @error="handleIconError"
+                />
+                <span v-else class="text-3xl">🔧</span>
+              </div>
+              <h2 class="text-xl font-bold">{{ selectedPlugin.name }}</h2>
+              <p>v{{ selectedPlugin.version }}</p>
+              <span
+                :class="[
+                  'inline-block px-3 py-1 text-sm font-medium rounded-full mt-2',
+                  selectedPlugin.status === 'active'
+                    ? ''
+                    : ''
+                ]"
+              >
+                {{ selectedPlugin.status === 'active' ? '已启用' : '已禁用' }}
+              </span>
+            </div>
+
+            <div class="space-y-4">
+              <div class="detail-item">
+                <label class="detail-label">描述</label>
+                <div class="detail-value">{{ selectedPlugin.description || '暂无描述' }}</div>
+              </div>
+              <div class="detail-item">
+                <label class="detail-label">作者</label>
+                <div class="detail-value">{{ selectedPlugin.author }}</div>
+              </div>
+              <div class="detail-item">
+                <label class="detail-label">分类</label>
+                <div class="detail-value">{{ getCategoryDisplayName(selectedPlugin.category) }}</div>
+              </div>
+              <div class="detail-item">
+                <label class="detail-label">所属库</label>
+                <div class="detail-value">{{ selectedPlugin.libraryName || selectedPlugin.libraryId || '未知' }}</div>
+              </div>
+              <div class="detail-item">
+                <label class="detail-label">依赖数量</label>
+                <div class="detail-value">{{ selectedPlugin.dependencies.length }} 个</div>
+              </div>
+              <div class="detail-item">
+                <label class="detail-label">入口文件</label>
+                <div class="detail-value">{{ selectedPlugin.main }}</div>
+              </div>
+              <div class="detail-item">
+                <label class="detail-label">安装时间</label>
+                <div class="detail-value">{{ formatDate(selectedPlugin.createdAt) }}</div>
+              </div>
+              <div class="detail-item">
+                <label class="detail-label">更新时间</label>
+                <div class="detail-value">{{ formatDate(selectedPlugin.updatedAt) }}</div>
+              </div>
+            </div>
+
+            <div v-if="selectedPlugin.tags && selectedPlugin.tags.length > 0" class="mt-6">
+              <h4 class="font-semibold mb-2">标签</h4>
+              <div class="flex flex-wrap gap-2">
+                <span v-for="tag in selectedPlugin.tags" :key="tag" class="px-2 py-1 text-xs rounded">
+                  {{ tag }}
+                </span>
+              </div>
+            </div>
+
+            <div v-if="selectedPlugin.dependencies.length > 0" class="mt-6">
+              <h4 class="font-semibold mb-2">依赖项</h4>
+              <div class="space-y-1">
+                <span
+                  v-for="dep in selectedPlugin.dependencies"
+                  :key="dep"
+                  class="block px-2 py-1 text-xs rounded"
+                >
+                  {{ dep }}
+                </span>
+              </div>
+            </div>
+
+            <div class="flex gap-2 mt-6">
+              <button
+                type="button"
+                :disabled="!selectedPlugin.configurable"
+                @click="configurePlugin(selectedPlugin)"
+                class="flex-1 px-4 py-2 text-white rounded hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                配置插件
+              </button>
+              <button
+                type="button"
+                @click="togglePlugin(selectedPlugin, selectedPlugin.status !== 'active')"
+                class="px-4 py-2 text-white rounded hover:bg-gray-700 focus:outline-none focus:ring-2 focus:ring-gray-500"
+              >
+                {{ selectedPlugin.status === 'active' ? '禁用' : '启用' }}
+              </button>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- 安装插件对话框 -->
+    <div v-if="showInstallDialog" class="fixed inset-0 bg-gray-600 bg-opacity-50 overflow-y-auto h-full w-full z-50">
+      <div class="relative top-20 mx-auto p-5 border w-96 shadow-lg rounded-md">
+        <div class="mt-3">
+          <h3 class="text-lg font-medium mb-4">为 {{ currentLibraryName }} 安装插件</h3>
+          
+          <!-- 安装方式选择 -->
+          <div class="mb-4">
+            <div class="flex border-b">
+              <button
+                :class="[
+                  'px-4 py-2 font-medium text-sm',
+                  installTab === 'local'
+                    ? 'border-b-2 border-blue-500'
+                    : ''
+                ]"
+                @click="installTab = 'local'"
+              >
+                从本地安装
+              </button>
+              <button
+                :class="[
+                  'px-4 py-2 font-medium text-sm',
+                  installTab === 'repository'
+                    ? 'border-b-2 border-blue-500'
+                    : ''
+                ]"
+                @click="installTab = 'repository'"
+              >
+                从仓库安装
+              </button>
+            </div>
+          </div>
+
+          <!-- 本地安装 -->
+          <div v-if="installTab === 'local'" class="space-y-4">
+            <div>
+              <label class="block text-sm font-medium mb-2">选择插件包</label>
+              <input
+                type="file"
+                accept=".zip,.tar.gz"
+                @change="handleFileSelect"
+                class="block w-full text-sm file:mr-4 file:py-2 file:px-4 file:rounded-full file:border-0 file:text-sm file:font-semibold file:bg-blue-50 hover:file:bg-blue-100"
+              />
+              <p class="text-xs mt-1">支持 .zip 和 .tar.gz 格式的插件包</p>
+            </div>
+            <div v-if="selectedFile" class="text-sm">
+              已选择: {{ selectedFile.name }}
+            </div>
+          </div>
+          
+          <!-- 仓库安装 -->
+          <div v-if="installTab === 'repository'" class="space-y-4">
+            <div>
+              <label class="block text-sm font-medium mb-1">插件名称</label>
+              <input
+                v-model="installForm.name"
+                type="text"
+                placeholder="请输入npm包名称，如：mira-plugin-example"
+                class="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-1 focus:ring-blue-500 focus:border-blue-500"
+              />
+            </div>
+            <div>
+              <label class="block text-sm font-medium mb-1">版本</label>
+              <input
+                v-model="installForm.version"
+                type="text"
+                placeholder="latest"
+                class="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-1 focus:ring-blue-500 focus:border-blue-500"
+              />
+            </div>
+          </div>
+
+          <div class="flex justify-end space-x-3 pt-4">
+            <button
+              type="button"
+              @click="cancelInstall"
+              class="px-4 py-2 border rounded-md text-sm font-medium focus:outline-none focus:ring-2 focus:ring-offset-2"
+            >
+              取消
+            </button>
+            <button
+              type="button"
+              @click="handleInstallOk"
+              :disabled="loading"
+              class="px-4 py-2 border border-transparent rounded-md shadow-sm text-sm font-medium text-white bg-blue-600 hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500 disabled:opacity-50 disabled:cursor-not-allowed"
+            >
+              {{ loading ? '安装中...' : '安装' }}
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- 插件配置对话框 -->
+    <div v-if="showConfigDialog" class="fixed inset-0 bg-gray-600 bg-opacity-50 overflow-y-auto h-full w-full z-50">
+      <div class="relative top-10 mx-auto p-5 border w-2/3 max-w-4xl shadow-lg rounded-md">
+        <div class="mt-3">
+          <h3 class="text-lg font-medium mb-4">配置 {{ configuringPlugin?.name }}</h3>
+          
+          <div v-if="configuringPlugin" class="config-editor">
+            <MonacoEditor
+              v-model="pluginConfig"
+              language="json"
+              :height="400"
+            />
+          </div>
+
+          <div class="flex justify-end space-x-3 pt-4">
+            <button
+              type="button"
+              @click="showConfigDialog = false"
+              class="px-4 py-2 border rounded-md text-sm font-medium focus:outline-none focus:ring-2 focus:ring-offset-2"
+            >
+              取消
+            </button>
+            <button
+              type="button"
+              @click="savePluginConfig"
+              :disabled="loading"
+              class="px-4 py-2 border border-transparent rounded-md shadow-sm text-sm font-medium text-white hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500 disabled:opacity-50 disabled:cursor-not-allowed"
+            >
+              {{ loading ? '保存中...' : '保存' }}
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- 点击遮罩关闭下拉菜单 -->
+    <div v-if="activeDropdown" @click="activeDropdown = null" class="fixed inset-0 z-0"></div>
+  </div>
+</template>
+
+<script setup lang="ts">
+import { ref, computed, onMounted, reactive } from 'vue';
+
+import { notification } from 'ant-design-vue';
+
+import type { Plugin } from '#/types/mira';
+
+import MonacoEditor from '#/components/mira/MonacoEditor.vue';
+import miraApiClient from '#/api/mira/client';
+
+defineOptions({ name: 'MiraPlugin' });
+
+// 定义接口
+interface LibraryWithPlugins {
+  id: string;
+  name: string;
+  description: string;
+  plugins: Plugin[];
+}
+
+// 响应式数据
+const loading = ref(false);
+const showInstallDialog = ref(false);
+const showConfigDialog = ref(false);
+const showDetailDrawer = ref(false);
+const installTab = ref('local');
+const configuringPlugin = ref<Plugin | null>(null);
+const selectedPlugin = ref<Plugin | null>(null);
+const pluginConfig = ref('');
+const selectedFile = ref<File | null>(null);
+const librariesWithPlugins = ref<LibraryWithPlugins[]>([]);
+const activeLibraryTab = ref('');
+const activeDropdown = ref<string | null>(null);
+
+// 每个素材库的搜索、排序、分页状态
+const searchKeywords = reactive<{ [key: string]: string }>({});
+const sortOptions = reactive<{ [key: string]: string }>({});
+const categoryFilters = reactive<{ [key: string]: string }>({});
+const currentInstallLibraryId = ref<string>('');
+
+const installForm = ref({
+  name: '',
+  version: 'latest',
+});
+
+// 计算属性
+const totalPluginsCount = computed(() => {
+  return librariesWithPlugins.value.reduce((total, library) => total + library.plugins.length, 0);
+});
+
+const activePluginsCount = computed(() => {
+  return librariesWithPlugins.value.reduce(
+    (total, library) => total + library.plugins.filter((p) => p.status === 'active').length,
+    0,
+  );
+});
+
+const inactivePluginsCount = computed(() => {
+  return librariesWithPlugins.value.reduce(
+    (total, library) => total + library.plugins.filter((p) => p.status === 'inactive').length,
+    0,
+  );
+});
+
+const currentLibraryName = computed(() => {
+  if (!currentInstallLibraryId.value) return '插件';
+  const library = librariesWithPlugins.value.find((lib) => lib.id === currentInstallLibraryId.value);
+  return library ? library.name || library.id : '插件';
+});
+
+// 方法
+const getCategoryDisplayName = (category?: string) => {
+  const categoryMap: { [key: string]: string } = {
+    general: '通用',
+    security: '安全',
+    storage: '存储',
+    ui: '界面',
+    utility: '工具',
+    integration: '集成',
+    development: '开发',
+  };
+  return categoryMap[category || 'general'] || category || '通用';
+};
+
+const getAvailableCategories = (plugins: Plugin[]) => {
+  const categories = new Set(plugins.map((p) => p.category || 'general'));
+  return Array.from(categories).sort();
+};
+
+const getActiveCount = (plugins: Plugin[]) => {
+  return plugins.filter((p) => p.status === 'active').length;
+};
+
+const getInactiveCount = (plugins: Plugin[]) => {
+  return plugins.filter((p) => p.status === 'inactive').length;
+};
+
+const getFilteredPlugins = (library: LibraryWithPlugins) => {
+  let result = library.plugins;
+
+  // 搜索过滤
+  const searchKeyword = searchKeywords[library.id] || '';
+  if (searchKeyword) {
+    const keyword = searchKeyword.toLowerCase();
+    result = result.filter(
+      (plugin) =>
+        plugin.name.toLowerCase().includes(keyword) ||
+        plugin.author.toLowerCase().includes(keyword) ||
+        (plugin.description && plugin.description.toLowerCase().includes(keyword)),
+    );
+  }
+
+  // 分类过滤
+  const categoryFilter = categoryFilters[library.id] || '';
+  if (categoryFilter) {
+    result = result.filter((plugin) => plugin.category === categoryFilter);
+  }
+
+  // 排序
+  const sortBy = sortOptions[library.id] || 'status';
+  result.sort((a, b) => {
+    switch (sortBy) {
+      case 'status':
+        // 已启用排在前面
+        if (a.status !== b.status) {
+          return a.status === 'active' ? -1 : 1;
+        }
+        return a.name.localeCompare(b.name);
+      case 'name':
+        return a.name.localeCompare(b.name);
+      case 'author':
+        return a.author.localeCompare(b.author);
+      case 'createdAt':
+        return new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime();
+      case 'category':
+        return (a.category || '').localeCompare(b.category || '');
+      default:
+        return 0;
+    }
+  });
+
+  return result;
+};
+
+const handleIconError = (event: Event) => {
+  // 当图标加载失败时，隐藏图片元素
+  const img = event.target as HTMLImageElement;
+  img.style.display = 'none';
+};
+
+const toggleDropdown = (pluginName: string) => {
+  activeDropdown.value = activeDropdown.value === pluginName ? null : pluginName;
+};
+
+const openInstallDialog = (libraryId: string) => {
+  currentInstallLibraryId.value = libraryId;
+  showInstallDialog.value = true;
+};
+
+const handleSearch = (_libraryId: string) => {
+  // 搜索逻辑已在getFilteredPlugins中实现
+};
+
+const handleSort = (_libraryId: string) => {
+  // 排序逻辑已在getFilteredPlugins中实现
+};
+
+const handleFilter = (_libraryId: string) => {
+  // 过滤逻辑已在getFilteredPlugins中实现
+};
+
+const showPluginDetail = (plugin: Plugin) => {
+  selectedPlugin.value = plugin;
+  showDetailDrawer.value = true;
+  activeDropdown.value = null;
+};
+
+const formatDate = (dateString: string) => {
+  return new Date(dateString).toLocaleString('zh-CN');
+};
+
+const loadLibrariesWithPlugins = async () => {
+  loading.value = true;
+  try {
+    const response = await miraApiClient.get('/plugins/by-library');
+    librariesWithPlugins.value = (response.data as LibraryWithPlugins[]) || [];
+
+    // 初始化各库的状态
+    librariesWithPlugins.value.forEach((library) => {
+      if (!searchKeywords[library.id]) searchKeywords[library.id] = '';
+      if (!sortOptions[library.id]) sortOptions[library.id] = 'status';
+      if (!categoryFilters[library.id]) categoryFilters[library.id] = '';
+    });
+
+    // 设置默认活动标签
+    if (librariesWithPlugins.value.length > 0 && !activeLibraryTab.value) {
+      activeLibraryTab.value = librariesWithPlugins.value[0]!.id;
+    }
+  } catch (error) {
+    notification.error({
+      message: '加载失败',
+      description: '加载插件列表失败，请稍后重试',
+    });
+    console.error('Failed to load plugins:', error);
+    librariesWithPlugins.value = [];
+  } finally {
+    loading.value = false;
+  }
+};
+
+const togglePlugin = async (plugin: Plugin, checked?: boolean) => {
+  try {
+    const newStatus = checked !== undefined ? (checked ? 'active' : 'inactive') : plugin.status === 'active' ? 'inactive' : 'active';
+
+    // 使用POST接口避免URL字符冲突
+    await miraApiClient.post('/plugins/toggle-status', {
+      pluginName: plugin.name,
+      libraryId: plugin.libraryId,
+      status: newStatus,
+    });
+
+    plugin.status = newStatus;
+
+    // 如果在详情面板中，也要更新选中的插件状态
+    if (selectedPlugin.value && selectedPlugin.value.name === plugin.name) {
+      selectedPlugin.value.status = newStatus;
+    }
+
+    notification.success({
+      message: '状态更新',
+      description: `插件已${newStatus === 'active' ? '启用' : '禁用'}`,
+    });
+  } catch (error: any) {
+    console.error('Toggle plugin error:', error);
+    notification.error({
+      message: '操作失败',
+      description: error.response?.data?.error || error.message || '未知错误',
+    });
+  }
+};
+
+const configurePlugin = async (plugin: Plugin) => {
+  try {
+    const response = await miraApiClient.get(`/plugins/${plugin.name}/config`);
+    pluginConfig.value = JSON.stringify(response.data, null, 2);
+    configuringPlugin.value = plugin;
+    showConfigDialog.value = true;
+    showDetailDrawer.value = false; // 关闭详情面板
+  } catch (error) {
+    notification.error({
+      message: '加载失败',
+      description: '加载插件配置失败',
+    });
+  }
+};
+
+const savePluginConfig = async () => {
+  if (!configuringPlugin.value) return;
+
+  try {
+    const config = JSON.parse(pluginConfig.value);
+    await miraApiClient.put(`/plugins/${configuringPlugin.value.name}/config`, config);
+    notification.success({
+      message: '保存成功',
+      description: '配置保存成功',
+    });
+    showConfigDialog.value = false;
+  } catch (error: any) {
+    if (error instanceof SyntaxError) {
+      notification.error({
+        message: '格式错误',
+        description: 'JSON 格式错误',
+      });
+    } else {
+      notification.error({
+        message: '保存失败',
+        description: '保存失败',
+      });
+    }
+  }
+};
+
+const handlePluginAction = async (command: string, plugin: Plugin) => {
+  activeDropdown.value = null;
+
+  switch (command) {
+    case 'update':
+      try {
+        await miraApiClient.post(`/plugins/${plugin.name}/update`);
+        notification.success({
+          message: '更新成功',
+          description: '插件更新成功',
+        });
+        loadLibrariesWithPlugins();
+      } catch (error) {
+        notification.error({
+          message: '更新失败',
+          description: '更新失败',
+        });
+      }
+      break;
+
+    case 'uninstall':
+      try {
+        const confirmed = confirm(`确定要卸载插件 "${plugin.name}" 吗？此操作不可撤销。`);
+
+        if (!confirmed) return;
+
+        await miraApiClient.delete(`/plugins/${plugin.name}`);
+        notification.success({
+          message: '卸载成功',
+          description: '插件卸载成功',
+        });
+
+        // 如果卸载的是当前选中的插件，关闭详情面板
+        if (selectedPlugin.value && selectedPlugin.value.name === plugin.name) {
+          showDetailDrawer.value = false;
+          selectedPlugin.value = null;
+        }
+
+        loadLibrariesWithPlugins();
+      } catch (error: any) {
+        notification.error({
+          message: '卸载失败',
+          description: '卸载失败',
+        });
+      }
+      break;
+  }
+};
+
+const handleFileSelect = (event: Event) => {
+  const target = event.target as HTMLInputElement;
+  if (target.files && target.files.length > 0) {
+    selectedFile.value = target.files[0] || null;
+  }
+};
+
+const cancelInstall = () => {
+  showInstallDialog.value = false;
+  selectedFile.value = null;
+  currentInstallLibraryId.value = '';
+  installForm.value = { name: '', version: 'latest' };
+};
+
+const handleInstallOk = async () => {
+  if (installTab.value === 'repository') {
+    await installFromRepository();
+  } else {
+    await uploadPlugin();
+  }
+};
+
+const uploadPlugin = async () => {
+  if (!selectedFile.value) {
+    notification.error({
+      message: '文件错误',
+      description: '请选择插件包文件',
+    });
+    return;
+  }
+
+  try {
+    const formData = new FormData();
+    formData.append('file', selectedFile.value);
+    if (currentInstallLibraryId.value) {
+      formData.append('libraryId', currentInstallLibraryId.value);
+    }
+
+    await miraApiClient.post('/plugins/upload', formData, {
+      headers: {
+        'Content-Type': 'multipart/form-data',
+      },
+    });
+
+    notification.success({
+      message: '安装成功',
+      description: '插件上传安装成功，稍后刷新插件列表',
+    });
+
+    cancelInstall();
+
+    // 延迟3秒刷新插件列表
+    setTimeout(() => {
+      loadLibrariesWithPlugins();
+    }, 3000);
+  } catch (error) {
+    notification.error({
+      message: '安装失败',
+      description: '插件安装失败',
+    });
+  }
+};
+
+const installFromRepository = async () => {
+  if (!installForm.value.name) {
+    notification.error({
+      message: '输入错误',
+      description: '请输入插件名称',
+    });
+    return;
+  }
+
+  try {
+    const requestData = {
+      ...installForm.value,
+      libraryId: currentInstallLibraryId.value,
+    };
+    await miraApiClient.post('/plugins/install', requestData);
+    notification.success({
+      message: '安装成功',
+      description: '插件安装成功，稍后刷新插件列表',
+    });
+
+    cancelInstall();
+
+    // 延迟3秒刷新插件列表
+    setTimeout(() => {
+      loadLibrariesWithPlugins();
+    }, 3000);
+  } catch (error: any) {
+    if (error.response?.data?.error) {
+      notification.error({
+        message: '安装失败',
+        description: error.response.data.error,
+      });
+    } else {
+      notification.error({
+        message: '安装失败',
+        description: '安装失败',
+      });
+    }
+  }
+};
+
+onMounted(() => {
+  loadLibrariesWithPlugins();
+});
+</script>
+
+<style scoped>
+.plugin-manager {
+  padding: 24px;
+  min-height: 100vh;
+}
+
+/* 统计卡片样式 */
+.stats-card {
+  padding: 20px;
+  border-radius: 12px;
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  color: white;
+  box-shadow: 0 4px 15px rgba(0, 0, 0, 0.1);
+  transition: transform 0.2s ease, box-shadow 0.2s ease;
+}
+
+.stats-card:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 8px 25px rgba(0, 0, 0, 0.15);
+}
+
+.stats-card.total-plugins {
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+}
+
+.stats-card.active-plugins {
+  background: linear-gradient(135deg, #56ab2f 0%, #a8e6cf 100%);
+}
+
+.stats-card.inactive-plugins {
+  background: linear-gradient(135deg, #ff6b6b 0%, #ffa8a8 100%);
+}
+
+.stats-content {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+}
+
+.stats-icon {
+  font-size: 24px;
+  opacity: 0.9;
+}
+
+.stats-info h3 {
+  margin: 0;
+  font-size: 14px;
+  font-weight: 500;
+  opacity: 0.9;
+}
+
+.stats-number {
+  margin: 4px 0 0 0;
+  font-size: 28px;
+  font-weight: 700;
+}
+
+/* 标签页样式 */
+.library-tabs {
+  margin-top: 24px;
+}
+
+.tab-nav {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 24px;
+  border-bottom: 1px solid #e5e7eb;
+  padding-bottom: 12px;
+}
+
+.tab-button {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 16px;
+  border: 1px solid;
+  border-radius: 6px;
+  font-weight: 500;
+  transition: all 0.2s ease;
+  cursor: pointer;
+}
+
+.tab-button:hover {
+}
+
+.tab-button.active {
+}
+
+.tab-count {
+  background: rgba(255, 255, 255, 0.2);
+  padding: 2px 6px;
+  border-radius: 10px;
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.tab-button.active .tab-count {
+  background: rgba(255, 255, 255, 0.3);
+}
+
+/* 库统计样式 */
+.library-stat {
+  padding: 16px;
+  border-radius: 8px;
+  border: 1px solid #e5e7eb;
+  text-align: center;
+  min-width: 100px;
+}
+
+.stat-title {
+  font-size: 12px;
+  font-weight: 500;
+  margin-bottom: 4px;
+}
+
+.stat-value {
+  font-size: 18px;
+  font-weight: 600;
+}
+
+/* 插件卡片样式 */
+.plugin-card {
+  border: 1px solid #e5e7eb;
+  border-radius: 12px;
+  padding: 20px;
+  height: 320px;
+  display: flex;
+  flex-direction: column;
+  transition: all 0.3s ease;
+  position: relative;
+  overflow: hidden;
+}
+
+.plugin-card:hover {
+  box-shadow: 0 8px 30px rgba(0, 0, 0, 0.12);
+  transform: translateY(-2px);
+}
+
+.plugin-card.border-green-200 {
+}
+
+.plugin-card.border-gray-200 {
+}
+
+.plugin-header {
+  border-bottom: 1px solid #f0f0f0;
+  padding-bottom: 12px;
+  margin-bottom: 12px;
+}
+
+.plugin-info {
+  border-radius: 6px;
+  padding: 12px;
+}
+
+.plugin-actions {
+  margin-top: auto;
+}
+
+.line-clamp-2 {
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* 状态指示器 */
+.plugin-card.border-green-200::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 4px;
+  height: 100%;
+  background: #52c41a;
+  border-radius: 0 4px 4px 0;
+}
+
+.plugin-card.border-gray-200::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 4px;
+  height: 100%;
+  background: #d9d9d9;
+  border-radius: 0 4px 4px 0;
+}
+
+/* Switch 样式 */
+.switch {
+  position: relative;
+  display: inline-block;
+  width: 50px;
+  height: 24px;
+}
+
+.switch input {
+  opacity: 0;
+  width: 0;
+  height: 0;
+}
+
+.slider {
+  position: absolute;
+  cursor: pointer;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  transition: 0.4s;
+  border-radius: 24px;
+}
+
+.slider:before {
+  position: absolute;
+  content: '';
+  height: 18px;
+  width: 18px;
+  left: 3px;
+  bottom: 3px;
+  background-color: var(--ant-color-bg-base, white);
+  transition: 0.4s;
+  border-radius: 50%;
+}
+
+input:checked + .slider {
+}
+
+input:checked + .slider:before {
+  transform: translateX(26px);
+}
+
+/* 详情面板样式 */
+.plugin-detail {
+  padding: 16px 0;
+}
+
+.detail-item {
+  padding: 12px 0;
+  border-bottom: 1px solid #f0f0f0;
+}
+
+.detail-item:last-child {
+  border-bottom: none;
+}
+
+.detail-label {
+  display: block;
+  font-size: 14px;
+  font-weight: 600;
+  margin-bottom: 4px;
+}
+
+.detail-value {
+  font-size: 14px;
+  word-break: break-word;
+}
+
+/* 骨架屏样式 */
+.plugin-skeleton {
+  border: 1px solid #e5e7eb;
+  border-radius: 12px;
+  padding: 20px;
+  height: 320px;
+}
+
+/* 响应式设计 */
+@media (max-width: 768px) {
+  .plugin-manager {
+    padding: 16px;
+  }
+  
+  .flex.flex-wrap.gap-4 {
+    flex-direction: column;
+    gap: 16px;
+  }
+  
+  .grid {
+    grid-template-columns: 1fr;
+  }
+  
+  .tab-nav {
+    flex-direction: column;
+  }
+}
+
+@media (max-width: 1024px) {
+  .grid.grid-cols-1.md\:grid-cols-2.lg\:grid-cols-3.xl\:grid-cols-4 {
+    grid-template-columns: repeat(2, 1fr);
+  }
+}
+
+/* 动画效果 */
+.plugin-card {
+  animation: fadeInUp 0.3s ease-out;
+}
+
+@keyframes fadeInUp {
+  from {
+    opacity: 0;
+    transform: translateY(20px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+/* 下拉菜单样式 */
+.relative {
+  position: relative;
+}
+</style>
