@@ -1,539 +1,14 @@
-<template>
-  <div class="plugin-manager ">
-    <!-- 总体统计卡片 -->
-    <div class="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8 ">
-      <div class="stats-card total-plugins">
-        <div class="stats-content">
-          <div class="stats-icon">🔧</div>
-          <div class="stats-info">
-            <h3>总插件数</h3>
-            <p class="stats-number">{{ totalPluginsCount }}</p>
-          </div>
-        </div>
-      </div>
-      
-      <div class="stats-card active-plugins">
-        <div class="stats-content">
-          <div class="stats-icon">✅</div>
-          <div class="stats-info">
-            <h3>已启用</h3>
-            <p class="stats-number">{{ activePluginsCount }}</p>
-          </div>
-        </div>
-      </div>
-      
-      <div class="stats-card inactive-plugins">
-        <div class="stats-content">
-          <div class="stats-icon">❌</div>
-          <div class="stats-info">
-            <h3>已禁用</h3>
-            <p class="stats-number">{{ inactivePluginsCount }}</p>
-          </div>
-        </div>
-      </div>
-    </div>
-
-    <!-- 资源库标签页 -->
-    <div class="library-tabs">
-      <div class="tab-nav">
-        <button
-          v-for="library in librariesWithPlugins"
-          :key="library.id"
-          :class="[
-            'tab-button',
-            { 'active': activeLibraryTab === library.id }
-          ]"
-          @click="activeLibraryTab = library.id"
-        >
-          {{ library.name || library.id }}
-          <span class="tab-count">{{ library.plugins.length }}</span>
-        </button>
-      </div>
-
-      <!-- 当前库的插件内容 -->
-      <div v-for="library in librariesWithPlugins" :key="library.id" class="tab-content">
-        <div v-if="activeLibraryTab === library.id">
-          <!-- 控制栏背景 -->
-          <div class="flex flex-wrap gap-4 mb-6 p-4 rounded-lg">
-            <div class="relative flex-1 min-w-64">
-              <div class="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
-                <svg class="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"></path>
-                </svg>
-              </div>
-              <input
-                v-model="searchKeywords[library.id]"
-                type="text"
-                placeholder="搜索插件名称、作者或描述"
-                class="block w-full pl-10 pr-3 py-2 border border-gray-300 rounded-md leading-5 placeholder-gray-500 focus:outline-none focus:placeholder-gray-400 focus:ring-1 focus:ring-blue-500 focus:border-blue-500"
-                @input="handleSearch(library.id)"
-              />
-            </div>
-            
-            <select
-              v-model="sortOptions[library.id]"
-              class="block px-3 py-2 border border-gray-300 rounded-md leading-5 focus:outline-none focus:ring-1 focus:ring-blue-500 focus:border-blue-500"
-              @change="handleSort(library.id)"
-            >
-              <option value="status">启用状态</option>
-              <option value="name">名称</option>
-              <option value="author">作者</option>
-              <option value="createdAt">安装时间</option>
-              <option value="category">分类</option>
-            </select>
-            
-            <select
-              v-model="categoryFilters[library.id]"
-              class="block px-3 py-2 border border-gray-300 rounded-md leading-5 focus:outline-none focus:ring-1 focus:ring-blue-500 focus:border-blue-500"
-              @change="handleFilter(library.id)"
-            >
-              <option value="">全部分类</option>
-              <option
-                v-for="category in getAvailableCategories(library.plugins)"
-                :key="category"
-                :value="category"
-              >
-                {{ getCategoryDisplayName(category) }}
-              </option>
-            </select>
-            
-            <button
-              type="button"
-              @click="openInstallDialog(library.id)"
-              class="inline-flex items-center px-4 py-2 border border-transparent text-sm font-medium rounded-md text-white bg-blue-600 hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500"
-            >
-              <svg class="-ml-1 mr-2 h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"></path>
-              </svg>
-              安装插件
-            </button>
-          </div>
-
-          <!-- 当前库插件统计 -->
-          <div class="flex gap-4 mb-6">
-            <div class="library-stat">
-              <div class="stat-title">插件数量</div>
-              <div class="stat-value">{{ library.plugins.length }}</div>
-            </div>
-            <div class="library-stat">
-              <div class="stat-title">已启用</div>
-              <div class="stat-value">{{ getActiveCount(library.plugins) }}</div>
-            </div>
-            <div class="library-stat">
-              <div class="stat-title">已禁用</div>
-              <div class="stat-value">{{ getInactiveCount(library.plugins) }}</div>
-            </div>
-          </div>
-
-          <!-- 插件网格视图 -->
-          <div v-if="loading && library.plugins.length === 0" class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
-            <div v-for="i in 8" :key="i" class="plugin-skeleton">
-              <div class="animate-pulse">
-                <div class="flex items-center space-x-4 mb-4">
-                  <div class="w-10 h-10 rounded-lg"></div>
-                  <div class="flex-1">
-                    <div class="h-4 rounded w-3/4 mb-2"></div>
-                    <div class="h-3 rounded w-1/2"></div>
-                  </div>
-                  <div class="w-12 h-6 rounded"></div>
-                </div>
-                <div class="space-y-2">
-                  <div class="h-3 rounded"></div>
-                  <div class="h-3 rounded w-5/6"></div>
-                </div>
-                <div class="flex justify-between mt-4">
-                  <div class="h-6 rounded w-12"></div>
-                  <div class="h-6 rounded w-12"></div>
-                </div>
-              </div>
-            </div>
-          </div>
-          
-          <div v-else class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
-            <div
-              v-for="plugin in getFilteredPlugins(library)"
-              :key="plugin.name"
-              :class="[
-                'plugin-card transition-all duration-200 cursor-pointer',
-                {
-                  'border-green-200': plugin.status === 'active',
-                  'border-gray-200': plugin.status === 'inactive'
-                }
-              ]"
-            >
-              <div class="plugin-header flex items-center justify-between mb-4">
-                <div class="flex items-center">
-                  <div class="w-10 h-10 mr-3 flex items-center justify-center rounded-lg">
-                    <img
-                      v-if="plugin.icon"
-                      :src="plugin.icon"
-                      :alt="plugin.name"
-                      class="w-8 h-8 object-contain"
-                      @error="handleIconError"
-                    />
-                    <span v-else class="text-xl">🔧</span>
-                  </div>
-                  <div>
-                    <h3 class="font-semibold text-lg truncate">{{ plugin.name }}</h3>
-                    <p class="text-sm">v{{ plugin.version }}</p>
-                  </div>
-                </div>
-                <label class="switch">
-                  <input
-                    type="checkbox"
-                    :checked="plugin.status === 'active'"
-                    @change="(e) => togglePlugin(plugin, (e.target as HTMLInputElement).checked)"
-                  />
-                  <span class="slider"></span>
-                </label>
-              </div>
-
-              <p class="text-sm mb-4 line-clamp-2">
-                {{ plugin.description || '暂无描述' }}
-              </p>
-
-              <div class="plugin-info space-y-2 mb-4">
-                <div class="flex justify-between text-sm">
-                  <span>作者:</span>
-                  <span class="truncate ml-2">{{ plugin.author }}</span>
-                </div>
-                <div class="flex justify-between text-sm">
-                  <span>分类:</span>
-                  <span class="px-2 py-1 text-xs rounded">{{ getCategoryDisplayName(plugin.category) }}</span>
-                </div>
-              </div>
-
-              <div class="plugin-actions flex gap-2 mt-auto">
-                <button
-                  type="button"
-                  @click="showPluginDetail(plugin)"
-                  class="flex-1 px-3 py-2 text-sm text-white rounded hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500"
-                >
-                  详情
-                </button>
-                
-                <button
-                  v-if="plugin.configurable"
-                  type="button"
-                  @click="configurePlugin(plugin)"
-                  class="px-3 py-2 text-sm text-white rounded hover:bg-gray-700 focus:outline-none focus:ring-2 focus:ring-gray-500"
-                >
-                  配置
-                </button>
-                
-                <div class="relative">
-                  <button
-                    type="button"
-                    @click="toggleDropdown(plugin.name)"
-                    class="px-3 py-2 text-sm rounded focus:outline-none focus:ring-2"
-                  >
-                    更多
-                    <svg class="w-3 h-3 ml-1 inline" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"></path>
-                    </svg>
-                  </button>
-                  
-                  <div
-                    v-if="activeDropdown === plugin.name"
-                    class="absolute right-0 mt-1 w-32 border border-gray-200 rounded-md shadow-lg z-10"
-                  >
-                    <button
-                      @click="handlePluginAction('update', plugin)"
-                      class="block w-full text-left px-4 py-2 text-sm"
-                    >
-                      更新
-                    </button>
-                    <hr class="border-gray-100">
-                    <button
-                      @click="handlePluginAction('uninstall', plugin)"
-                      class="block w-full text-left px-4 py-2 text-sm"
-                    >
-                      卸载
-                    </button>
-                  </div>
-                </div>
-              </div>
-            </div>
-          </div>
-
-          <!-- 空状态 -->
-          <div v-if="!loading && getFilteredPlugins(library).length === 0" class="text-center py-12">
-            <div class="text-4xl mb-4">🔧</div>
-            <p class="text-lg font-medium mb-2">
-              {{ (searchKeywords[library.id] || categoryFilters[library.id]) ? '没有找到匹配的插件' : '暂无插件' }}
-            </p>
-            <p class="text-sm">
-              {{ (searchKeywords[library.id] || categoryFilters[library.id]) ? '请尝试调整搜索条件' : '点击"安装插件"开始添加' }}
-            </p>
-          </div>
-        </div>
-      </div>
-    </div>
-
-    <!-- 插件详情侧边面板 -->
-    <div v-if="showDetailDrawer" class="fixed inset-0 bg-gray-600 bg-opacity-50 overflow-y-auto h-full w-full z-50">
-      <div class="relative top-0 right-0 w-96 h-full shadow-lg ml-auto">
-        <div class="p-6">
-          <div class="flex justify-between items-center mb-6">
-            <h2 class="text-xl font-bold">插件详细信息</h2>
-            <button
-              @click="showDetailDrawer = false"
-              class="focus:outline-none"
-            >
-              <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path>
-              </svg>
-            </button>
-          </div>
-
-          <div v-if="selectedPlugin" class="plugin-detail">
-            <div class="text-center mb-6">
-              <div class="w-16 h-16 mx-auto mb-4 flex items-center justify-center rounded-lg">
-                <img
-                  v-if="selectedPlugin.icon"
-                  :src="selectedPlugin.icon"
-                  :alt="selectedPlugin.name"
-                  class="w-12 h-12 object-contain"
-                  @error="handleIconError"
-                />
-                <span v-else class="text-3xl">🔧</span>
-              </div>
-              <h2 class="text-xl font-bold">{{ selectedPlugin.name }}</h2>
-              <p>v{{ selectedPlugin.version }}</p>
-              <span
-                :class="[
-                  'inline-block px-3 py-1 text-sm font-medium rounded-full mt-2',
-                  selectedPlugin.status === 'active'
-                    ? ''
-                    : ''
-                ]"
-              >
-                {{ selectedPlugin.status === 'active' ? '已启用' : '已禁用' }}
-              </span>
-            </div>
-
-            <div class="space-y-4">
-              <div class="detail-item">
-                <label class="detail-label">描述</label>
-                <div class="detail-value">{{ selectedPlugin.description || '暂无描述' }}</div>
-              </div>
-              <div class="detail-item">
-                <label class="detail-label">作者</label>
-                <div class="detail-value">{{ selectedPlugin.author }}</div>
-              </div>
-              <div class="detail-item">
-                <label class="detail-label">分类</label>
-                <div class="detail-value">{{ getCategoryDisplayName(selectedPlugin.category) }}</div>
-              </div>
-              <div class="detail-item">
-                <label class="detail-label">所属库</label>
-                <div class="detail-value">{{ selectedPlugin.libraryName || selectedPlugin.libraryId || '未知' }}</div>
-              </div>
-              <div class="detail-item">
-                <label class="detail-label">依赖数量</label>
-                <div class="detail-value">{{ selectedPlugin.dependencies.length }} 个</div>
-              </div>
-              <div class="detail-item">
-                <label class="detail-label">入口文件</label>
-                <div class="detail-value">{{ selectedPlugin.main }}</div>
-              </div>
-              <div class="detail-item">
-                <label class="detail-label">安装时间</label>
-                <div class="detail-value">{{ formatDate(selectedPlugin.createdAt) }}</div>
-              </div>
-              <div class="detail-item">
-                <label class="detail-label">更新时间</label>
-                <div class="detail-value">{{ formatDate(selectedPlugin.updatedAt) }}</div>
-              </div>
-            </div>
-
-            <div v-if="selectedPlugin.tags && selectedPlugin.tags.length > 0" class="mt-6">
-              <h4 class="font-semibold mb-2">标签</h4>
-              <div class="flex flex-wrap gap-2">
-                <span v-for="tag in selectedPlugin.tags" :key="tag" class="px-2 py-1 text-xs rounded">
-                  {{ tag }}
-                </span>
-              </div>
-            </div>
-
-            <div v-if="selectedPlugin.dependencies.length > 0" class="mt-6">
-              <h4 class="font-semibold mb-2">依赖项</h4>
-              <div class="space-y-1">
-                <span
-                  v-for="dep in selectedPlugin.dependencies"
-                  :key="dep"
-                  class="block px-2 py-1 text-xs rounded"
-                >
-                  {{ dep }}
-                </span>
-              </div>
-            </div>
-
-            <div class="flex gap-2 mt-6">
-              <button
-                type="button"
-                :disabled="!selectedPlugin.configurable"
-                @click="configurePlugin(selectedPlugin)"
-                class="flex-1 px-4 py-2 text-white rounded hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:opacity-50 disabled:cursor-not-allowed"
-              >
-                配置插件
-              </button>
-              <button
-                type="button"
-                @click="togglePlugin(selectedPlugin, selectedPlugin.status !== 'active')"
-                class="px-4 py-2 text-white rounded hover:bg-gray-700 focus:outline-none focus:ring-2 focus:ring-gray-500"
-              >
-                {{ selectedPlugin.status === 'active' ? '禁用' : '启用' }}
-              </button>
-            </div>
-          </div>
-        </div>
-      </div>
-    </div>
-
-    <!-- 安装插件对话框 -->
-    <div v-if="showInstallDialog" class="fixed inset-0 bg-gray-600 bg-opacity-50 overflow-y-auto h-full w-full z-50">
-      <div class="relative top-20 mx-auto p-5 border w-96 shadow-lg rounded-md">
-        <div class="mt-3">
-          <h3 class="text-lg font-medium mb-4">为 {{ currentLibraryName }} 安装插件</h3>
-          
-          <!-- 安装方式选择 -->
-          <div class="mb-4">
-            <div class="flex border-b">
-              <button
-                :class="[
-                  'px-4 py-2 font-medium text-sm',
-                  installTab === 'local'
-                    ? 'border-b-2 border-blue-500'
-                    : ''
-                ]"
-                @click="installTab = 'local'"
-              >
-                从本地安装
-              </button>
-              <button
-                :class="[
-                  'px-4 py-2 font-medium text-sm',
-                  installTab === 'repository'
-                    ? 'border-b-2 border-blue-500'
-                    : ''
-                ]"
-                @click="installTab = 'repository'"
-              >
-                从仓库安装
-              </button>
-            </div>
-          </div>
-
-          <!-- 本地安装 -->
-          <div v-if="installTab === 'local'" class="space-y-4">
-            <div>
-              <label class="block text-sm font-medium mb-2">选择插件包</label>
-              <input
-                type="file"
-                accept=".zip,.tar.gz"
-                @change="handleFileSelect"
-                class="block w-full text-sm file:mr-4 file:py-2 file:px-4 file:rounded-full file:border-0 file:text-sm file:font-semibold file:bg-blue-50 hover:file:bg-blue-100"
-              />
-              <p class="text-xs mt-1">支持 .zip 和 .tar.gz 格式的插件包</p>
-            </div>
-            <div v-if="selectedFile" class="text-sm">
-              已选择: {{ selectedFile.name }}
-            </div>
-          </div>
-          
-          <!-- 仓库安装 -->
-          <div v-if="installTab === 'repository'" class="space-y-4">
-            <div>
-              <label class="block text-sm font-medium mb-1">插件名称</label>
-              <input
-                v-model="installForm.name"
-                type="text"
-                placeholder="请输入npm包名称，如：mira-plugin-example"
-                class="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-1 focus:ring-blue-500 focus:border-blue-500"
-              />
-            </div>
-            <div>
-              <label class="block text-sm font-medium mb-1">版本</label>
-              <input
-                v-model="installForm.version"
-                type="text"
-                placeholder="latest"
-                class="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-1 focus:ring-blue-500 focus:border-blue-500"
-              />
-            </div>
-          </div>
-
-          <div class="flex justify-end space-x-3 pt-4">
-            <button
-              type="button"
-              @click="cancelInstall"
-              class="px-4 py-2 border rounded-md text-sm font-medium focus:outline-none focus:ring-2 focus:ring-offset-2"
-            >
-              取消
-            </button>
-            <button
-              type="button"
-              @click="handleInstallOk"
-              :disabled="loading"
-              class="px-4 py-2 border border-transparent rounded-md shadow-sm text-sm font-medium text-white bg-blue-600 hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500 disabled:opacity-50 disabled:cursor-not-allowed"
-            >
-              {{ loading ? '安装中...' : '安装' }}
-            </button>
-          </div>
-        </div>
-      </div>
-    </div>
-
-    <!-- 插件配置对话框 -->
-    <div v-if="showConfigDialog" class="fixed inset-0 bg-gray-600 bg-opacity-50 overflow-y-auto h-full w-full z-50">
-      <div class="relative top-10 mx-auto p-5 border w-2/3 max-w-4xl shadow-lg rounded-md">
-        <div class="mt-3">
-          <h3 class="text-lg font-medium mb-4">配置 {{ configuringPlugin?.name }}</h3>
-          
-          <div v-if="configuringPlugin" class="config-editor">
-            <MonacoEditor
-              v-model="pluginConfig"
-              language="json"
-              :height="400"
-            />
-          </div>
-
-          <div class="flex justify-end space-x-3 pt-4">
-            <button
-              type="button"
-              @click="showConfigDialog = false"
-              class="px-4 py-2 border rounded-md text-sm font-medium focus:outline-none focus:ring-2 focus:ring-offset-2"
-            >
-              取消
-            </button>
-            <button
-              type="button"
-              @click="savePluginConfig"
-              :disabled="loading"
-              class="px-4 py-2 border border-transparent rounded-md shadow-sm text-sm font-medium text-white hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500 disabled:opacity-50 disabled:cursor-not-allowed"
-            >
-              {{ loading ? '保存中...' : '保存' }}
-            </button>
-          </div>
-        </div>
-      </div>
-    </div>
-
-    <!-- 点击遮罩关闭下拉菜单 -->
-    <div v-if="activeDropdown" @click="activeDropdown = null" class="fixed inset-0 z-0"></div>
-  </div>
-</template>
-
 <script setup lang="ts">
-import { ref, computed, onMounted, reactive } from 'vue';
+import type { Plugin } from '#/types/mira';
+
+import { computed, onMounted, reactive, ref } from 'vue';
+
+import { useVbenModal } from '@vben/common-ui';
 
 import { notification } from 'ant-design-vue';
 
-import type { Plugin } from '#/types/mira';
-
-import MonacoEditor from '#/components/mira/MonacoEditor.vue';
 import miraApiClient from '#/api/mira/client';
+import MonacoEditor from '#/components/mira/MonacoEditor.vue';
 
 defineOptions({ name: 'MiraPlugin' });
 
@@ -547,17 +22,22 @@ interface LibraryWithPlugins {
 
 // 响应式数据
 const loading = ref(false);
-const showInstallDialog = ref(false);
 const showConfigDialog = ref(false);
 const showDetailDrawer = ref(false);
 const installTab = ref('local');
-const configuringPlugin = ref<Plugin | null>(null);
-const selectedPlugin = ref<Plugin | null>(null);
+const configuringPlugin = ref<null | Plugin>(null);
+const selectedPlugin = ref<null | Plugin>(null);
 const pluginConfig = ref('');
 const selectedFile = ref<File | null>(null);
 const librariesWithPlugins = ref<LibraryWithPlugins[]>([]);
 const activeLibraryTab = ref('');
-const activeDropdown = ref<string | null>(null);
+const activeDropdown = ref<null | string>(null);
+
+// 使用 VbenModal 创建安装插件对话框
+const [Modal, modalApi] = useVbenModal({
+  title: '安装插件',
+  class: 'w-[500px]',
+});
 
 // 每个素材库的搜索、排序、分页状态
 const searchKeywords = reactive<{ [key: string]: string }>({});
@@ -572,27 +52,26 @@ const installForm = ref({
 
 // 计算属性
 const totalPluginsCount = computed(() => {
-  return librariesWithPlugins.value.reduce((total, library) => total + library.plugins.length, 0);
+  return librariesWithPlugins.value.reduce(
+    (total, library) => total + library.plugins.length,
+    0,
+  );
 });
 
 const activePluginsCount = computed(() => {
   return librariesWithPlugins.value.reduce(
-    (total, library) => total + library.plugins.filter((p) => p.status === 'active').length,
+    (total, library) =>
+      total + library.plugins.filter((p) => p.status === 'active').length,
     0,
   );
 });
 
 const inactivePluginsCount = computed(() => {
   return librariesWithPlugins.value.reduce(
-    (total, library) => total + library.plugins.filter((p) => p.status === 'inactive').length,
+    (total, library) =>
+      total + library.plugins.filter((p) => p.status === 'inactive').length,
     0,
   );
-});
-
-const currentLibraryName = computed(() => {
-  if (!currentInstallLibraryId.value) return '插件';
-  const library = librariesWithPlugins.value.find((lib) => lib.id === currentInstallLibraryId.value);
-  return library ? library.name || library.id : '插件';
 });
 
 // 方法
@@ -611,7 +90,7 @@ const getCategoryDisplayName = (category?: string) => {
 
 const getAvailableCategories = (plugins: Plugin[]) => {
   const categories = new Set(plugins.map((p) => p.category || 'general'));
-  return Array.from(categories).sort();
+  return [...categories].sort();
 };
 
 const getActiveCount = (plugins: Plugin[]) => {
@@ -633,7 +112,8 @@ const getFilteredPlugins = (library: LibraryWithPlugins) => {
       (plugin) =>
         plugin.name.toLowerCase().includes(keyword) ||
         plugin.author.toLowerCase().includes(keyword) ||
-        (plugin.description && plugin.description.toLowerCase().includes(keyword)),
+        (plugin.description &&
+          plugin.description.toLowerCase().includes(keyword)),
     );
   }
 
@@ -647,22 +127,30 @@ const getFilteredPlugins = (library: LibraryWithPlugins) => {
   const sortBy = sortOptions[library.id] || 'status';
   result.sort((a, b) => {
     switch (sortBy) {
-      case 'status':
+      case 'author': {
+        return a.author.localeCompare(b.author);
+      }
+      case 'category': {
+        return (a.category || '').localeCompare(b.category || '');
+      }
+      case 'createdAt': {
+        return (
+          new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
+        );
+      }
+      case 'name': {
+        return a.name.localeCompare(b.name);
+      }
+      case 'status': {
         // 已启用排在前面
         if (a.status !== b.status) {
           return a.status === 'active' ? -1 : 1;
         }
         return a.name.localeCompare(b.name);
-      case 'name':
-        return a.name.localeCompare(b.name);
-      case 'author':
-        return a.author.localeCompare(b.author);
-      case 'createdAt':
-        return new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime();
-      case 'category':
-        return (a.category || '').localeCompare(b.category || '');
-      default:
+      }
+      default: {
         return 0;
+      }
     }
   });
 
@@ -676,12 +164,17 @@ const handleIconError = (event: Event) => {
 };
 
 const toggleDropdown = (pluginName: string) => {
-  activeDropdown.value = activeDropdown.value === pluginName ? null : pluginName;
+  activeDropdown.value =
+    activeDropdown.value === pluginName ? null : pluginName;
 };
 
 const openInstallDialog = (libraryId: string) => {
   currentInstallLibraryId.value = libraryId;
-  showInstallDialog.value = true;
+  const library = librariesWithPlugins.value.find(
+    (lib) => lib.id === libraryId,
+  );
+  const libraryName = library ? library.name || library.id : '插件';
+  modalApi.setState({ title: `为 ${libraryName} 安装插件` }).open();
 };
 
 const handleSearch = (_libraryId: string) => {
@@ -737,7 +230,14 @@ const loadLibrariesWithPlugins = async () => {
 
 const togglePlugin = async (plugin: Plugin, checked?: boolean) => {
   try {
-    const newStatus = checked !== undefined ? (checked ? 'active' : 'inactive') : plugin.status === 'active' ? 'inactive' : 'active';
+    const newStatus =
+      checked === undefined
+        ? (plugin.status === 'active'
+          ? 'inactive'
+          : 'active')
+        : (checked
+          ? 'active'
+          : 'inactive');
 
     // 使用POST接口避免URL字符冲突
     await miraApiClient.post('/plugins/toggle-status', {
@@ -773,7 +273,7 @@ const configurePlugin = async (plugin: Plugin) => {
     configuringPlugin.value = plugin;
     showConfigDialog.value = true;
     showDetailDrawer.value = false; // 关闭详情面板
-  } catch (error) {
+  } catch {
     notification.error({
       message: '加载失败',
       description: '加载插件配置失败',
@@ -786,7 +286,10 @@ const savePluginConfig = async () => {
 
   try {
     const config = JSON.parse(pluginConfig.value);
-    await miraApiClient.put(`/plugins/${configuringPlugin.value.name}/config`, config);
+    await miraApiClient.put(
+      `/plugins/${configuringPlugin.value.name}/config`,
+      config,
+    );
     notification.success({
       message: '保存成功',
       description: '配置保存成功',
@@ -811,25 +314,11 @@ const handlePluginAction = async (command: string, plugin: Plugin) => {
   activeDropdown.value = null;
 
   switch (command) {
-    case 'update':
+    case 'uninstall': {
       try {
-        await miraApiClient.post(`/plugins/${plugin.name}/update`);
-        notification.success({
-          message: '更新成功',
-          description: '插件更新成功',
-        });
-        loadLibrariesWithPlugins();
-      } catch (error) {
-        notification.error({
-          message: '更新失败',
-          description: '更新失败',
-        });
-      }
-      break;
-
-    case 'uninstall':
-      try {
-        const confirmed = confirm(`确定要卸载插件 "${plugin.name}" 吗？此操作不可撤销。`);
+        const confirmed = confirm(
+          `确定要卸载插件 "${plugin.name}" 吗？此操作不可撤销。`,
+        );
 
         if (!confirmed) return;
 
@@ -846,13 +335,31 @@ const handlePluginAction = async (command: string, plugin: Plugin) => {
         }
 
         loadLibrariesWithPlugins();
-      } catch (error: any) {
+      } catch {
         notification.error({
           message: '卸载失败',
           description: '卸载失败',
         });
       }
       break;
+    }
+
+    case 'update': {
+      try {
+        await miraApiClient.post(`/plugins/${plugin.name}/update`);
+        notification.success({
+          message: '更新成功',
+          description: '插件更新成功',
+        });
+        loadLibrariesWithPlugins();
+      } catch {
+        notification.error({
+          message: '更新失败',
+          description: '更新失败',
+        });
+      }
+      break;
+    }
   }
 };
 
@@ -864,18 +371,16 @@ const handleFileSelect = (event: Event) => {
 };
 
 const cancelInstall = () => {
-  showInstallDialog.value = false;
+  modalApi.close();
   selectedFile.value = null;
   currentInstallLibraryId.value = '';
   installForm.value = { name: '', version: 'latest' };
 };
 
 const handleInstallOk = async () => {
-  if (installTab.value === 'repository') {
-    await installFromRepository();
-  } else {
-    await uploadPlugin();
-  }
+  await (installTab.value === 'repository'
+    ? installFromRepository()
+    : uploadPlugin());
 };
 
 const uploadPlugin = async () => {
@@ -911,7 +416,7 @@ const uploadPlugin = async () => {
     setTimeout(() => {
       loadLibrariesWithPlugins();
     }, 3000);
-  } catch (error) {
+  } catch {
     notification.error({
       message: '安装失败',
       description: '插件安装失败',
@@ -965,6 +470,627 @@ onMounted(() => {
 });
 </script>
 
+<template>
+  <div class="plugin-manager">
+    <!-- 总体统计卡片 -->
+    <div class="mb-8 grid grid-cols-1 gap-6 md:grid-cols-3">
+      <div class="stats-card total-plugins">
+        <div class="stats-content">
+          <div class="stats-icon">🔧</div>
+          <div class="stats-info">
+            <h3>总插件数</h3>
+            <p class="stats-number">{{ totalPluginsCount }}</p>
+          </div>
+        </div>
+      </div>
+
+      <div class="stats-card active-plugins">
+        <div class="stats-content">
+          <div class="stats-icon">✅</div>
+          <div class="stats-info">
+            <h3>已启用</h3>
+            <p class="stats-number">{{ activePluginsCount }}</p>
+          </div>
+        </div>
+      </div>
+
+      <div class="stats-card inactive-plugins">
+        <div class="stats-content">
+          <div class="stats-icon">❌</div>
+          <div class="stats-info">
+            <h3>已禁用</h3>
+            <p class="stats-number">{{ inactivePluginsCount }}</p>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- 资源库标签页 -->
+    <div class="library-tabs">
+      <div class="tab-nav">
+        <button
+          v-for="library in librariesWithPlugins"
+          :key="library.id"
+          class="tab-button"
+          :class="[{ active: activeLibraryTab === library.id }]"
+          @click="activeLibraryTab = library.id"
+        >
+          {{ library.name || library.id }}
+          <span class="tab-count">{{ library.plugins.length }}</span>
+        </button>
+      </div>
+
+      <!-- 当前库的插件内容 -->
+      <div
+        v-for="library in librariesWithPlugins"
+        :key="library.id"
+        class="tab-content"
+      >
+        <div v-if="activeLibraryTab === library.id">
+          <!-- 控制栏背景 -->
+          <div class="mb-6 flex flex-wrap gap-4 rounded-lg p-4">
+            <div class="relative min-w-64 flex-1">
+              <div
+                class="pointer-events-none absolute inset-y-0 left-0 flex items-center pl-3"
+              >
+                <svg
+                  class="h-5 w-5"
+                  fill="none"
+                  stroke="currentColor"
+                  viewBox="0 0 24 24"
+                >
+                  <path
+                    stroke-linecap="round"
+                    stroke-linejoin="round"
+                    stroke-width="2"
+                    d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"
+                  />
+                </svg>
+              </div>
+              <input
+                v-model="searchKeywords[library.id]"
+                type="text"
+                placeholder="搜索插件名称、作者或描述"
+                class="block w-full rounded-md border border-gray-300 py-2 pl-10 pr-3 leading-5 placeholder-gray-500 focus:border-blue-500 focus:placeholder-gray-400 focus:outline-none focus:ring-1 focus:ring-blue-500"
+                @input="handleSearch(library.id)"
+              />
+            </div>
+
+            <select
+              v-model="sortOptions[library.id]"
+              class="block rounded-md border border-gray-300 px-3 py-2 leading-5 focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
+              @change="handleSort(library.id)"
+            >
+              <option value="status">启用状态</option>
+              <option value="name">名称</option>
+              <option value="author">作者</option>
+              <option value="createdAt">安装时间</option>
+              <option value="category">分类</option>
+            </select>
+
+            <select
+              v-model="categoryFilters[library.id]"
+              class="block rounded-md border border-gray-300 px-3 py-2 leading-5 focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
+              @change="handleFilter(library.id)"
+            >
+              <option value="">全部分类</option>
+              <option
+                v-for="category in getAvailableCategories(library.plugins)"
+                :key="category"
+                :value="category"
+              >
+                {{ getCategoryDisplayName(category) }}
+              </option>
+            </select>
+
+            <button
+              type="button"
+              @click="openInstallDialog(library.id)"
+              class="inline-flex items-center rounded-md border border-transparent bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2"
+            >
+              <svg
+                class="-ml-1 mr-2 h-4 w-4"
+                fill="none"
+                stroke="currentColor"
+                viewBox="0 0 24 24"
+              >
+                <path
+                  stroke-linecap="round"
+                  stroke-linejoin="round"
+                  stroke-width="2"
+                  d="M12 4v16m8-8H4"
+                />
+              </svg>
+              安装插件
+            </button>
+          </div>
+
+          <!-- 当前库插件统计 -->
+          <div class="mb-6 flex gap-4">
+            <div class="library-stat">
+              <div class="stat-title">插件数量</div>
+              <div class="stat-value">{{ library.plugins.length }}</div>
+            </div>
+            <div class="library-stat">
+              <div class="stat-title">已启用</div>
+              <div class="stat-value">
+                {{ getActiveCount(library.plugins) }}
+              </div>
+            </div>
+            <div class="library-stat">
+              <div class="stat-title">已禁用</div>
+              <div class="stat-value">
+                {{ getInactiveCount(library.plugins) }}
+              </div>
+            </div>
+          </div>
+
+          <!-- 插件网格视图 -->
+          <div
+            v-if="loading && library.plugins.length === 0"
+            class="grid grid-cols-1 gap-6 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4"
+          >
+            <div v-for="i in 8" :key="i" class="plugin-skeleton">
+              <div class="animate-pulse">
+                <div class="mb-4 flex items-center space-x-4">
+                  <div class="h-10 w-10 rounded-lg"></div>
+                  <div class="flex-1">
+                    <div class="mb-2 h-4 w-3/4 rounded"></div>
+                    <div class="h-3 w-1/2 rounded"></div>
+                  </div>
+                  <div class="h-6 w-12 rounded"></div>
+                </div>
+                <div class="space-y-2">
+                  <div class="h-3 rounded"></div>
+                  <div class="h-3 w-5/6 rounded"></div>
+                </div>
+                <div class="mt-4 flex justify-between">
+                  <div class="h-6 w-12 rounded"></div>
+                  <div class="h-6 w-12 rounded"></div>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div
+            v-else
+            class="grid grid-cols-1 gap-6 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4"
+          >
+            <div
+              v-for="plugin in getFilteredPlugins(library)"
+              :key="plugin.name"
+              class="plugin-card cursor-pointer transition-all duration-200"
+              :class="[
+                {
+                  'border-green-200': plugin.status === 'active',
+                  'border-gray-200': plugin.status === 'inactive',
+                },
+              ]"
+            >
+              <div class="plugin-header mb-4 flex items-center justify-between">
+                <div class="flex items-center">
+                  <div
+                    class="mr-3 flex h-10 w-10 items-center justify-center rounded-lg"
+                  >
+                    <img
+                      v-if="plugin.icon"
+                      :src="plugin.icon"
+                      :alt="plugin.name"
+                      class="h-8 w-8 object-contain"
+                      @error="handleIconError"
+                    />
+                    <span v-else class="text-xl">🔧</span>
+                  </div>
+                  <div>
+                    <h3 class="truncate text-lg font-semibold">
+                      {{ plugin.name }}
+                    </h3>
+                    <p class="text-sm">v{{ plugin.version }}</p>
+                  </div>
+                </div>
+                <label class="switch">
+                  <input
+                    type="checkbox"
+                    :checked="plugin.status === 'active'"
+                    @change="
+                      (e) =>
+                        togglePlugin(
+                          plugin,
+                          (e.target as HTMLInputElement).checked,
+                        )
+                    "
+                  />
+                  <span class="slider"></span>
+                </label>
+              </div>
+
+              <p class="mb-4 line-clamp-2 text-sm">
+                {{ plugin.description || '暂无描述' }}
+              </p>
+
+              <div class="plugin-info mb-4 space-y-2">
+                <div class="flex justify-between text-sm">
+                  <span>作者:</span>
+                  <span class="ml-2 truncate">{{ plugin.author }}</span>
+                </div>
+                <div class="flex justify-between text-sm">
+                  <span>分类:</span>
+                  <span class="rounded px-2 py-1 text-xs">{{
+                    getCategoryDisplayName(plugin.category)
+                  }}</span>
+                </div>
+              </div>
+
+              <div class="plugin-actions mt-auto flex gap-2">
+                <button
+                  type="button"
+                  @click="showPluginDetail(plugin)"
+                  class="flex-1 rounded px-3 py-2 text-sm text-white hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                >
+                  详情
+                </button>
+
+                <button
+                  v-if="plugin.configurable"
+                  type="button"
+                  @click="configurePlugin(plugin)"
+                  class="rounded px-3 py-2 text-sm text-white hover:bg-gray-700 focus:outline-none focus:ring-2 focus:ring-gray-500"
+                >
+                  配置
+                </button>
+
+                <div class="relative">
+                  <button
+                    type="button"
+                    @click="toggleDropdown(plugin.name)"
+                    class="rounded px-3 py-2 text-sm focus:outline-none focus:ring-2"
+                  >
+                    更多
+                    <svg
+                      class="ml-1 inline h-3 w-3"
+                      fill="none"
+                      stroke="currentColor"
+                      viewBox="0 0 24 24"
+                    >
+                      <path
+                        stroke-linecap="round"
+                        stroke-linejoin="round"
+                        stroke-width="2"
+                        d="M19 9l-7 7-7-7"
+                      />
+                    </svg>
+                  </button>
+
+                  <div
+                    v-if="activeDropdown === plugin.name"
+                    class="absolute right-0 z-10 mt-1 w-32 rounded-md border border-gray-200 shadow-lg"
+                  >
+                    <button
+                      @click="handlePluginAction('update', plugin)"
+                      class="block w-full px-4 py-2 text-left text-sm"
+                    >
+                      更新
+                    </button>
+                    <hr class="border-gray-100" />
+                    <button
+                      @click="handlePluginAction('uninstall', plugin)"
+                      class="block w-full px-4 py-2 text-left text-sm"
+                    >
+                      卸载
+                    </button>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <!-- 空状态 -->
+          <div
+            v-if="!loading && getFilteredPlugins(library).length === 0"
+            class="py-12 text-center"
+          >
+            <div class="mb-4 text-4xl">🔧</div>
+            <p class="mb-2 text-lg font-medium">
+              {{
+                searchKeywords[library.id] || categoryFilters[library.id]
+                  ? '没有找到匹配的插件'
+                  : '暂无插件'
+              }}
+            </p>
+            <p class="text-sm">
+              {{
+                searchKeywords[library.id] || categoryFilters[library.id]
+                  ? '请尝试调整搜索条件'
+                  : '点击"安装插件"开始添加'
+              }}
+            </p>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- 插件详情侧边面板 -->
+    <div
+      v-if="showDetailDrawer"
+      class="fixed inset-0 z-50 h-full w-full overflow-y-auto bg-gray-600 bg-opacity-50"
+    >
+      <div class="relative right-0 top-0 ml-auto h-full w-96 shadow-lg">
+        <div class="p-6">
+          <div class="mb-6 flex items-center justify-between">
+            <h2 class="text-xl font-bold">插件详细信息</h2>
+            <button
+              @click="showDetailDrawer = false"
+              class="focus:outline-none"
+            >
+              <svg
+                class="h-6 w-6"
+                fill="none"
+                stroke="currentColor"
+                viewBox="0 0 24 24"
+              >
+                <path
+                  stroke-linecap="round"
+                  stroke-linejoin="round"
+                  stroke-width="2"
+                  d="M6 18L18 6M6 6l12 12"
+                />
+              </svg>
+            </button>
+          </div>
+
+          <div v-if="selectedPlugin" class="plugin-detail">
+            <div class="mb-6 text-center">
+              <div
+                class="mx-auto mb-4 flex h-16 w-16 items-center justify-center rounded-lg"
+              >
+                <img
+                  v-if="selectedPlugin.icon"
+                  :src="selectedPlugin.icon"
+                  :alt="selectedPlugin.name"
+                  class="h-12 w-12 object-contain"
+                  @error="handleIconError"
+                />
+                <span v-else class="text-3xl">🔧</span>
+              </div>
+              <h2 class="text-xl font-bold">{{ selectedPlugin.name }}</h2>
+              <p>v{{ selectedPlugin.version }}</p>
+              <span
+                class="mt-2 inline-block rounded-full px-3 py-1 text-sm font-medium"
+                :class="[selectedPlugin.status === 'active' ? '' : '']"
+              >
+                {{ selectedPlugin.status === 'active' ? '已启用' : '已禁用' }}
+              </span>
+            </div>
+
+            <div class="space-y-4">
+              <div class="detail-item">
+                <label class="detail-label">描述</label>
+                <div class="detail-value">
+                  {{ selectedPlugin.description || '暂无描述' }}
+                </div>
+              </div>
+              <div class="detail-item">
+                <label class="detail-label">作者</label>
+                <div class="detail-value">{{ selectedPlugin.author }}</div>
+              </div>
+              <div class="detail-item">
+                <label class="detail-label">分类</label>
+                <div class="detail-value">
+                  {{ getCategoryDisplayName(selectedPlugin.category) }}
+                </div>
+              </div>
+              <div class="detail-item">
+                <label class="detail-label">所属库</label>
+                <div class="detail-value">
+                  {{
+                    selectedPlugin.libraryName ||
+                    selectedPlugin.libraryId ||
+                    '未知'
+                  }}
+                </div>
+              </div>
+              <div class="detail-item">
+                <label class="detail-label">依赖数量</label>
+                <div class="detail-value">
+                  {{ selectedPlugin.dependencies.length }} 个
+                </div>
+              </div>
+              <div class="detail-item">
+                <label class="detail-label">入口文件</label>
+                <div class="detail-value">{{ selectedPlugin.main }}</div>
+              </div>
+              <div class="detail-item">
+                <label class="detail-label">安装时间</label>
+                <div class="detail-value">
+                  {{ formatDate(selectedPlugin.createdAt) }}
+                </div>
+              </div>
+              <div class="detail-item">
+                <label class="detail-label">更新时间</label>
+                <div class="detail-value">
+                  {{ formatDate(selectedPlugin.updatedAt) }}
+                </div>
+              </div>
+            </div>
+
+            <div
+              v-if="selectedPlugin.tags && selectedPlugin.tags.length > 0"
+              class="mt-6"
+            >
+              <h4 class="mb-2 font-semibold">标签</h4>
+              <div class="flex flex-wrap gap-2">
+                <span
+                  v-for="tag in selectedPlugin.tags"
+                  :key="tag"
+                  class="rounded px-2 py-1 text-xs"
+                >
+                  {{ tag }}
+                </span>
+              </div>
+            </div>
+
+            <div v-if="selectedPlugin.dependencies.length > 0" class="mt-6">
+              <h4 class="mb-2 font-semibold">依赖项</h4>
+              <div class="space-y-1">
+                <span
+                  v-for="dep in selectedPlugin.dependencies"
+                  :key="dep"
+                  class="block rounded px-2 py-1 text-xs"
+                >
+                  {{ dep }}
+                </span>
+              </div>
+            </div>
+
+            <div class="mt-6 flex gap-2">
+              <button
+                type="button"
+                :disabled="!selectedPlugin.configurable"
+                @click="configurePlugin(selectedPlugin)"
+                class="flex-1 rounded px-4 py-2 text-white hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                配置插件
+              </button>
+              <button
+                type="button"
+                @click="
+                  togglePlugin(
+                    selectedPlugin,
+                    selectedPlugin.status !== 'active',
+                  )
+                "
+                class="rounded px-4 py-2 text-white hover:bg-gray-700 focus:outline-none focus:ring-2 focus:ring-gray-500"
+              >
+                {{ selectedPlugin.status === 'active' ? '禁用' : '启用' }}
+              </button>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- 插件配置对话框 -->
+    <div
+      v-if="showConfigDialog"
+      class="fixed inset-0 z-50 h-full w-full overflow-y-auto bg-gray-600 bg-opacity-50"
+    >
+      <div
+        class="relative top-10 mx-auto w-2/3 max-w-4xl rounded-md border p-5 shadow-lg"
+      >
+        <div class="mt-3">
+          <h3 class="mb-4 text-lg font-medium">
+            配置 {{ configuringPlugin?.name }}
+          </h3>
+
+          <div v-if="configuringPlugin" class="config-editor">
+            <MonacoEditor
+              v-model="pluginConfig"
+              language="json"
+              :height="400"
+            />
+          </div>
+
+          <div class="flex justify-end space-x-3 pt-4">
+            <button
+              type="button"
+              @click="showConfigDialog = false"
+              class="rounded-md border px-4 py-2 text-sm font-medium focus:outline-none focus:ring-2 focus:ring-offset-2"
+            >
+              取消
+            </button>
+            <button
+              type="button"
+              @click="savePluginConfig"
+              :disabled="loading"
+              class="rounded-md border border-transparent px-4 py-2 text-sm font-medium text-white shadow-sm hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              {{ loading ? '保存中...' : '保存' }}
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- VbenModal 安装插件对话框 -->
+    <Modal
+      :loading="loading"
+      :confirm-loading="loading"
+      @confirm="handleInstallOk"
+      @cancel="cancelInstall"
+    >
+      <!-- 安装方式选择 -->
+      <div class="mb-4">
+        <div class="flex border-b">
+          <button
+            class="px-4 py-2 text-sm font-medium"
+            :class="[
+              installTab === 'local' ? 'border-b-2 border-blue-500' : '',
+            ]"
+            @click="installTab = 'local'"
+          >
+            从本地安装
+          </button>
+          <button
+            class="px-4 py-2 text-sm font-medium"
+            :class="[
+              installTab === 'repository' ? 'border-b-2 border-blue-500' : '',
+            ]"
+            @click="installTab = 'repository'"
+          >
+            从仓库安装
+          </button>
+        </div>
+      </div>
+
+      <!-- 本地安装 -->
+      <div v-if="installTab === 'local'" class="space-y-4">
+        <div>
+          <label class="mb-2 block text-sm font-medium">选择插件包</label>
+          <input
+            type="file"
+            accept=".zip,.tar.gz"
+            @change="handleFileSelect"
+            class="block w-full text-sm file:mr-4 file:rounded-full file:border-0 file:bg-blue-50 file:px-4 file:py-2 file:text-sm file:font-semibold hover:file:bg-blue-100"
+          />
+          <p class="mt-1 text-xs">支持 .zip 和 .tar.gz 格式的插件包</p>
+        </div>
+        <div v-if="selectedFile" class="text-sm">
+          已选择: {{ selectedFile.name }}
+        </div>
+      </div>
+
+      <!-- 仓库安装 -->
+      <div v-if="installTab === 'repository'" class="space-y-4">
+        <div>
+          <label class="mb-1 block text-sm font-medium">插件名称</label>
+          <input
+            v-model="installForm.name"
+            type="text"
+            placeholder="请输入npm包名称，如：mira-plugin-example"
+            class="w-full rounded-md border border-gray-300 px-3 py-2 focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
+          />
+        </div>
+        <div>
+          <label class="mb-1 block text-sm font-medium">版本</label>
+          <input
+            v-model="installForm.version"
+            type="text"
+            placeholder="latest"
+            class="w-full rounded-md border border-gray-300 px-3 py-2 focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
+          />
+        </div>
+      </div>
+    </Modal>
+
+    <!-- 点击遮罩关闭下拉菜单 -->
+    <div
+      v-if="activeDropdown"
+      @click="activeDropdown = null"
+      class="fixed inset-0 z-0"
+    ></div>
+  </div>
+</template>
+
 <style scoped>
 .plugin-manager {
   padding: 24px;
@@ -978,7 +1104,9 @@ onMounted(() => {
   background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
   color: white;
   box-shadow: 0 4px 15px rgba(0, 0, 0, 0.1);
-  transition: transform 0.2s ease, box-shadow 0.2s ease;
+  transition:
+    transform 0.2s ease,
+    box-shadow 0.2s ease;
 }
 
 .stats-card:hover {
@@ -1240,16 +1368,16 @@ input:checked + .slider:before {
   .plugin-manager {
     padding: 16px;
   }
-  
+
   .flex.flex-wrap.gap-4 {
     flex-direction: column;
     gap: 16px;
   }
-  
+
   .grid {
     grid-template-columns: 1fr;
   }
-  
+
   .tab-nav {
     flex-direction: column;
   }
