@@ -19,12 +19,6 @@ const editingLibrary = ref<Library | null>(null);
 
 const libraries = ref<Library[]>([]);
 
-// 使用 VbenModal
-const [Modal, modalApi] = useVbenModal({
-  title: '添加资源库',
-  class: 'w-[500px]',
-});
-
 const libraryForm = ref({
   name: '',
   path: '',
@@ -285,6 +279,14 @@ const deleteLibrary = async (library: Library) => {
   }
 };
 
+// 使用 VbenModal - 在所有函数定义完成后
+const [Modal, modalApi] = useVbenModal({
+  title: '添加资源库',
+  class: 'w-[500px]',
+  onConfirm: saveLibrary,
+  onCancel: cancelEdit,
+});
+
 onMounted(() => {
   loadLibraries();
 });
@@ -542,12 +544,7 @@ onMounted(() => {
     </div>
 
     <!-- VbenModal 对话框 -->
-    <Modal
-      :loading="loading"
-      :confirm-loading="loading"
-      @confirm="saveLibrary"
-      @cancel="cancelEdit"
-    >
+    <Modal :loading="loading" :confirm-loading="loading">
       <form @submit.prevent="saveLibrary" class="space-y-4">
         <div>
           <label class="mb-1 block text-sm font-medium text-gray-700">

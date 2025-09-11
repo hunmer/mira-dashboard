@@ -45,12 +45,6 @@ const pluginRoutes = reactive<{ [key: string]: any[] }>({});
 const dropdownPosition = reactive({ x: 0, y: 0 });
 const selectedPluginForAction = ref<null | Plugin>(null);
 
-// 使用 VbenModal 创建安装插件对话框
-const [VbenModal, modalApi] = useVbenModal({
-  title: '安装插件',
-  class: 'w-[500px]',
-});
-
 // 每个素材库的搜索、排序、分页状态
 const searchKeywords = reactive<{ [key: string]: string }>({});
 const sortOptions = reactive<{ [key: string]: string }>({});
@@ -60,6 +54,7 @@ const currentInstallLibraryId = ref<string>('');
 const installForm = ref({
   name: '',
   version: 'latest',
+  proxy: '', // 添加代理地址字段
 });
 
 // 计算属性
@@ -294,14 +289,12 @@ const loadLibrariesWithPlugins = async () => {
 
 const togglePlugin = async (plugin: Plugin, checked?: boolean) => {
   try {
-    const newStatus =
-      checked === undefined
-        ? plugin.status === 'active'
-          ? 'inactive'
-          : 'active'
-        : checked
-          ? 'active'
-          : 'inactive';
+    let newStatus: 'active' | 'inactive';
+    if (checked === undefined) {
+      newStatus = plugin.status === 'active' ? 'inactive' : 'active';
+    } else {
+      newStatus = checked ? 'active' : 'inactive';
+    }
 
     // 使用POST接口避免URL字符冲突
     await miraApiClient.post('/plugins/toggle-status', {
@@ -441,7 +434,7 @@ const cancelInstall = () => {
   modalApi.close();
   selectedFile.value = null;
   currentInstallLibraryId.value = '';
-  installForm.value = { name: '', version: 'latest' };
+  installForm.value = { name: '', version: 'latest', proxy: '' };
 };
 
 const handleInstallOk = async () => {
@@ -504,6 +497,7 @@ const installFromRepository = async () => {
     const requestData = {
       ...installForm.value,
       libraryId: currentInstallLibraryId.value,
+      ...(installForm.value.proxy && { proxy: installForm.value.proxy }), // 只有填写了代理地址才发送
     };
     await miraApiClient.post('/plugins/install', requestData);
     notification.success({
@@ -531,6 +525,14 @@ const installFromRepository = async () => {
     }
   }
 };
+
+// 使用 VbenModal 创建安装插件对话框 - 在所有函数定义完成后
+const [VbenModal, modalApi] = useVbenModal({
+  title: '安装插件',
+  class: 'w-[500px]',
+  onConfirm: handleInstallOk,
+  onCancel: cancelInstall,
+});
 
 onMounted(() => {
   loadLibrariesWithPlugins();
@@ -1057,12 +1059,7 @@ onMounted(() => {
     </div>
 
     <!-- VbenModal 安装插件对话框 -->
-    <VbenModal
-      :loading="loading"
-      :confirm-loading="loading"
-      @confirm="handleInstallOk"
-      @cancel="cancelInstall"
-    >
+    <VbenModal :loading="loading" :confirm-loading="loading">
       <!-- 安装方式选择 -->
       <div class="mb-4">
         <div class="flex border-b">
@@ -1123,6 +1120,18 @@ onMounted(() => {
             placeholder="latest"
             class="w-full rounded-md border border-gray-300 px-3 py-2 focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
           />
+        </div>
+        <div>
+          <label class="mb-1 block text-sm font-medium">代理地址</label>
+          <input
+            v-model="installForm.proxy"
+            type="text"
+            placeholder="可选，如：http://proxy.example.com:8080"
+            class="w-full rounded-md border border-gray-300 px-3 py-2 focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
+          />
+          <p class="mt-1 text-xs text-gray-500">
+            如果网络环境需要代理才能访问npm仓库，请填写代理地址
+          </p>
         </div>
       </div>
     </VbenModal>
