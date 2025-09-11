@@ -1334,7 +1334,7 @@ onMounted(() => {
   height: 320px;
   padding: 20px;
   overflow: hidden;
-  background-color: #ffffff;
+  background-color: #fff;
   border: 1px solid #e5e7eb;
   border-radius: 12px;
   transition: all 0.3s ease;
@@ -1364,7 +1364,7 @@ onMounted(() => {
 
 .plugin-info {
   padding: 12px;
-  background-color: rgb(248 250 252 / 0.5);
+  background-color: rgb(248 250 252 / 50%);
   border-radius: 6px;
 }
 

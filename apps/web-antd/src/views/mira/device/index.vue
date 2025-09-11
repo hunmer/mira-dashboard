@@ -469,16 +469,16 @@ onUnmounted(() => {
 }
 
 .header-section {
-  margin-bottom: 1.5rem;
   display: flex;
   align-items: center;
   justify-content: space-between;
+  margin-bottom: 1.5rem;
 }
 
 .page-title {
   font-size: 1.5rem;
-  line-height: 2rem;
   font-weight: 700;
+  line-height: 2rem;
 }
 
 .page-description {
@@ -505,8 +505,8 @@ onUnmounted(() => {
 
 .action-buttons {
   display: flex;
-  gap: 0.25rem;
   flex-wrap: wrap;
+  gap: 0.25rem;
 }
 
 .device-detail {
@@ -515,8 +515,8 @@ onUnmounted(() => {
 }
 
 .message-section {
-  margin-top: 1.5rem;
   padding-top: 1rem;
+  margin-top: 1.5rem;
   border-top: 1px solid #f0f0f0;
 }
 
@@ -532,17 +532,17 @@ onUnmounted(() => {
 }
 
 .message-history {
-  margin-top: 1.5rem;
   padding-top: 1rem;
+  margin-top: 1.5rem;
   border-top: 1px solid #f0f0f0;
 }
 
 .message-list {
   max-height: 200px;
+  padding: 0.5rem;
   overflow-y: auto;
   border: 1px solid #f0f0f0;
   border-radius: 4px;
-  padding: 0.5rem;
 }
 
 .message-item {
@@ -556,8 +556,8 @@ onUnmounted(() => {
 }
 
 .message-time {
-  font-size: 0.75rem;
   margin-bottom: 0.25rem;
+  font-size: 0.75rem;
 }
 
 .message-content {
@@ -565,8 +565,8 @@ onUnmounted(() => {
 }
 
 .no-messages {
-  text-align: center;
   padding: 1rem;
+  text-align: center;
 }
 
 h4 {

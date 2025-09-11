@@ -408,10 +408,10 @@ onMounted(() => {
 }
 
 .page-title {
-  font-size: 1.5rem;
-  line-height: 2rem;
-  font-weight: 700;
   margin-bottom: 0.5rem;
+  font-size: 1.5rem;
+  font-weight: 700;
+  line-height: 2rem;
 }
 
 .page-description {
@@ -433,16 +433,16 @@ onMounted(() => {
 }
 
 .upload-area {
+  padding: 2rem;
   border: 2px dashed #d1d5db;
   border-radius: 0.5rem;
-  padding: 2rem;
   transition: border-color 0.2s ease;
 }
 
 .upload-area:hover,
 .upload-area.drag-over {
-  border-color: #3b82f6;
   background-color: #f8fafc;
+  border-color: #3b82f6;
 }
 
 .upload-dragger {
@@ -450,9 +450,9 @@ onMounted(() => {
 }
 
 .no-library-selected {
-  text-align: center;
   padding: 2rem;
   color: #6b7280;
+  text-align: center;
 }
 
 .upload-results {
@@ -481,8 +481,8 @@ onMounted(() => {
 }
 
 .error-message {
-  margin-top: 0.5rem;
   padding-left: 2rem;
+  margin-top: 0.5rem;
 }
 
 .folder-upload {
