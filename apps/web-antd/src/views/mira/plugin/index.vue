@@ -1,16 +1,20 @@
 <script setup lang="ts">
+import type { PluginRouteDefinition } from '#/api/core/plugin-routes';
 import type { Plugin } from '#/types/mira';
 
 import { computed, onMounted, reactive, ref } from 'vue';
+import { useRouter } from 'vue-router';
 
-import { useVbenModal } from '@vben/common-ui';
+import { useVbenDrawer, useVbenModal } from '@vben/common-ui';
 
-import { notification } from 'ant-design-vue';
+import { Modal, notification } from 'ant-design-vue';
 
+import { getPluginRoutesByLibrary } from '#/api/core/plugin-routes';
 import miraApiClient from '#/api/mira/client';
-import MonacoEditor from '#/components/mira/MonacoEditor.vue';
 
 defineOptions({ name: 'MiraPlugin' });
+
+const router = useRouter();
 
 // 定义接口
 interface LibraryWithPlugins {
@@ -23,7 +27,12 @@ interface LibraryWithPlugins {
 // 响应式数据
 const loading = ref(false);
 const showConfigDialog = ref(false);
-const showDetailDrawer = ref(false);
+// 使用 VbenDrawer 替代自定义 drawer
+const [PluginDetailDrawer, pluginDetailDrawerApi] = useVbenDrawer({
+  title: '插件详细信息',
+  class: 'w-[500px]',
+  footer: false,
+});
 const installTab = ref('local');
 const configuringPlugin = ref<null | Plugin>(null);
 const selectedPlugin = ref<null | Plugin>(null);
@@ -32,9 +41,12 @@ const selectedFile = ref<File | null>(null);
 const librariesWithPlugins = ref<LibraryWithPlugins[]>([]);
 const activeLibraryTab = ref('');
 const activeDropdown = ref<null | string>(null);
+const pluginRoutes = reactive<{ [key: string]: any[] }>({});
+const dropdownPosition = reactive({ x: 0, y: 0 });
+const selectedPluginForAction = ref<null | Plugin>(null);
 
 // 使用 VbenModal 创建安装插件对话框
-const [Modal, modalApi] = useVbenModal({
+const [VbenModal, modalApi] = useVbenModal({
   title: '安装插件',
   class: 'w-[500px]',
 });
@@ -73,6 +85,17 @@ const inactivePluginsCount = computed(() => {
     0,
   );
 });
+
+const dropdownStyle = computed(() => ({
+  left: `${dropdownPosition.x}px`,
+  top: `${dropdownPosition.y}px`,
+  position: 'fixed' as const,
+}));
+
+const getPluginRoutesForLibrary = (libraryId: string, pluginName: string) => {
+  const routes = pluginRoutes[libraryId] || [];
+  return routes.filter((route) => route.pluginName === pluginName);
+};
 
 // 方法
 const getCategoryDisplayName = (category?: string) => {
@@ -163,9 +186,23 @@ const handleIconError = (event: Event) => {
   img.style.display = 'none';
 };
 
-const toggleDropdown = (pluginName: string) => {
-  activeDropdown.value =
-    activeDropdown.value === pluginName ? null : pluginName;
+const toggleDropdown = (
+  pluginName: string,
+  plugin: Plugin,
+  event: MouseEvent,
+) => {
+  if (activeDropdown.value === pluginName) {
+    activeDropdown.value = null;
+    selectedPluginForAction.value = null;
+  } else {
+    activeDropdown.value = pluginName;
+    selectedPluginForAction.value = plugin;
+
+    // Calculate position for the dropdown
+    const rect = (event.target as HTMLElement).getBoundingClientRect();
+    dropdownPosition.x = rect.right - 128; // 128px is the width of dropdown
+    dropdownPosition.y = rect.bottom + 4;
+  }
 };
 
 const openInstallDialog = (libraryId: string) => {
@@ -191,12 +228,34 @@ const handleFilter = (_libraryId: string) => {
 
 const showPluginDetail = (plugin: Plugin) => {
   selectedPlugin.value = plugin;
-  showDetailDrawer.value = true;
+  pluginDetailDrawerApi.open();
   activeDropdown.value = null;
 };
 
 const formatDate = (dateString: string) => {
   return new Date(dateString).toLocaleString('zh-CN');
+};
+
+const loadPluginRoutes = async (libraryId: string) => {
+  try {
+    const routes = await getPluginRoutesByLibrary(libraryId);
+    pluginRoutes[libraryId] = routes || [];
+  } catch (error) {
+    console.error('Failed to load plugin routes:', error);
+    pluginRoutes[libraryId] = [];
+  }
+};
+
+const openRouteInNewTab = (route: PluginRouteDefinition) => {
+  // 在当前应用的标签页系统中打开新标签页
+  // 使用唯一的pageKey来确保打开新的标签页
+  const pageKey = `${route.name}_${Date.now()}`;
+  router.push({
+    path: route.path,
+    query: {
+      pageKey, // 使用pageKey参数来打开新的标签页
+    },
+  });
 };
 
 const loadLibrariesWithPlugins = async () => {
@@ -216,6 +275,11 @@ const loadLibrariesWithPlugins = async () => {
     if (librariesWithPlugins.value.length > 0 && !activeLibraryTab.value) {
       activeLibraryTab.value = librariesWithPlugins.value[0]!.id;
     }
+
+    // 加载每个库的插件路由
+    for (const library of librariesWithPlugins.value) {
+      await loadPluginRoutes(library.id);
+    }
   } catch (error) {
     notification.error({
       message: '加载失败',
@@ -232,12 +296,12 @@ const togglePlugin = async (plugin: Plugin, checked?: boolean) => {
   try {
     const newStatus =
       checked === undefined
-        ? (plugin.status === 'active'
+        ? plugin.status === 'active'
           ? 'inactive'
-          : 'active')
-        : (checked
+          : 'active'
+        : checked
           ? 'active'
-          : 'inactive');
+          : 'inactive';
 
     // 使用POST接口避免URL字符冲突
     await miraApiClient.post('/plugins/toggle-status', {
@@ -272,7 +336,7 @@ const configurePlugin = async (plugin: Plugin) => {
     pluginConfig.value = JSON.stringify(response.data, null, 2);
     configuringPlugin.value = plugin;
     showConfigDialog.value = true;
-    showDetailDrawer.value = false; // 关闭详情面板
+    pluginDetailDrawerApi.close(); // 关闭详情面板
   } catch {
     notification.error({
       message: '加载失败',
@@ -316,25 +380,28 @@ const handlePluginAction = async (command: string, plugin: Plugin) => {
   switch (command) {
     case 'uninstall': {
       try {
-        const confirmed = confirm(
-          `确定要卸载插件 "${plugin.name}" 吗？此操作不可撤销。`,
-        );
+        Modal.confirm({
+          title: '确认卸载',
+          content: `确定要卸载插件 "${plugin.name}" 吗？此操作不可撤销。`,
+          onOk: async () => {
+            await miraApiClient.delete(`/plugins/${plugin.name}`);
+            notification.success({
+              message: '卸载成功',
+              description: '插件卸载成功',
+            });
 
-        if (!confirmed) return;
+            // 如果卸载的是当前选中的插件，关闭详情面板
+            if (
+              selectedPlugin.value &&
+              selectedPlugin.value.name === plugin.name
+            ) {
+              pluginDetailDrawerApi.close();
+              selectedPlugin.value = null;
+            }
 
-        await miraApiClient.delete(`/plugins/${plugin.name}`);
-        notification.success({
-          message: '卸载成功',
-          description: '插件卸载成功',
+            loadLibrariesWithPlugins();
+          },
         });
-
-        // 如果卸载的是当前选中的插件，关闭详情面板
-        if (selectedPlugin.value && selectedPlugin.value.name === plugin.name) {
-          showDetailDrawer.value = false;
-          selectedPlugin.value = null;
-        }
-
-        loadLibrariesWithPlugins();
       } catch {
         notification.error({
           message: '卸载失败',
@@ -725,7 +792,7 @@ onMounted(() => {
                 <button
                   type="button"
                   @click="showPluginDetail(plugin)"
-                  class="flex-1 rounded px-3 py-2 text-sm text-white hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  class="flex-1 rounded bg-blue-600 px-3 py-2 text-sm text-white hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500"
                 >
                   详情
                 </button>
@@ -734,51 +801,55 @@ onMounted(() => {
                   v-if="plugin.configurable"
                   type="button"
                   @click="configurePlugin(plugin)"
-                  class="rounded px-3 py-2 text-sm text-white hover:bg-gray-700 focus:outline-none focus:ring-2 focus:ring-gray-500"
+                  class="rounded bg-gray-600 px-3 py-2 text-sm text-white hover:bg-gray-700 focus:outline-none focus:ring-2 focus:ring-gray-500"
                 >
                   配置
                 </button>
 
-                <div class="relative">
-                  <button
-                    type="button"
-                    @click="toggleDropdown(plugin.name)"
-                    class="rounded px-3 py-2 text-sm focus:outline-none focus:ring-2"
+                <button
+                  type="button"
+                  @click="toggleDropdown(plugin.name, plugin, $event)"
+                  class="rounded bg-gray-500 px-3 py-2 text-sm text-white hover:bg-gray-600 focus:outline-none focus:ring-2"
+                >
+                  更多
+                  <svg
+                    class="ml-1 inline h-3 w-3"
+                    fill="none"
+                    stroke="currentColor"
+                    viewBox="0 0 24 24"
                   >
-                    更多
-                    <svg
-                      class="ml-1 inline h-3 w-3"
-                      fill="none"
-                      stroke="currentColor"
-                      viewBox="0 0 24 24"
-                    >
-                      <path
-                        stroke-linecap="round"
-                        stroke-linejoin="round"
-                        stroke-width="2"
-                        d="M19 9l-7 7-7-7"
-                      />
-                    </svg>
-                  </button>
+                    <path
+                      stroke-linecap="round"
+                      stroke-linejoin="round"
+                      stroke-width="2"
+                      d="M19 9l-7 7-7-7"
+                    />
+                  </svg>
+                </button>
+              </div>
 
-                  <div
-                    v-if="activeDropdown === plugin.name"
-                    class="absolute right-0 z-10 mt-1 w-32 rounded-md border border-gray-200 shadow-lg"
+              <!-- 插件入口按钮 -->
+              <div
+                v-if="
+                  getPluginRoutesForLibrary(library.id, plugin.name).length > 0
+                "
+                class="mt-3 border-t pt-3"
+              >
+                <h4 class="mb-2 text-xs font-semibold text-gray-600">
+                  插件入口
+                </h4>
+                <div class="flex flex-wrap gap-1">
+                  <button
+                    v-for="route in getPluginRoutesForLibrary(
+                      library.id,
+                      plugin.name,
+                    )"
+                    :key="route.path"
+                    @click="openRouteInNewTab(route)"
+                    class="rounded bg-indigo-100 px-2 py-1 text-xs text-indigo-700 hover:bg-indigo-200 focus:outline-none focus:ring-1 focus:ring-indigo-500"
                   >
-                    <button
-                      @click="handlePluginAction('update', plugin)"
-                      class="block w-full px-4 py-2 text-left text-sm"
-                    >
-                      更新
-                    </button>
-                    <hr class="border-gray-100" />
-                    <button
-                      @click="handlePluginAction('uninstall', plugin)"
-                      class="block w-full px-4 py-2 text-left text-sm"
-                    >
-                      卸载
-                    </button>
-                  </div>
+                    {{ route.meta?.title || route.name }}
+                  </button>
                 </div>
               </div>
             </div>
@@ -809,165 +880,135 @@ onMounted(() => {
       </div>
     </div>
 
-    <!-- 插件详情侧边面板 -->
-    <div
-      v-if="showDetailDrawer"
-      class="fixed inset-0 z-50 h-full w-full overflow-y-auto bg-gray-600 bg-opacity-50"
-    >
-      <div class="relative right-0 top-0 ml-auto h-full w-96 shadow-lg">
-        <div class="p-6">
-          <div class="mb-6 flex items-center justify-between">
-            <h2 class="text-xl font-bold">插件详细信息</h2>
-            <button
-              @click="showDetailDrawer = false"
-              class="focus:outline-none"
-            >
-              <svg
-                class="h-6 w-6"
-                fill="none"
-                stroke="currentColor"
-                viewBox="0 0 24 24"
-              >
-                <path
-                  stroke-linecap="round"
-                  stroke-linejoin="round"
-                  stroke-width="2"
-                  d="M6 18L18 6M6 6l12 12"
-                />
-              </svg>
-            </button>
+    <!-- 使用 VbenDrawer 替代自定义抽屉 -->
+    <PluginDetailDrawer>
+      <div v-if="selectedPlugin" class="plugin-detail">
+        <div class="mb-6 text-center">
+          <div
+            class="mx-auto mb-4 flex h-16 w-16 items-center justify-center rounded-lg"
+          >
+            <img
+              v-if="selectedPlugin.icon"
+              :src="selectedPlugin.icon"
+              :alt="selectedPlugin.name"
+              class="h-12 w-12 object-contain"
+              @error="handleIconError"
+            />
+            <span v-else class="text-3xl">🔧</span>
           </div>
+          <h2 class="text-xl font-bold">{{ selectedPlugin.name }}</h2>
+          <p>v{{ selectedPlugin.version }}</p>
+          <span
+            class="mt-2 inline-block rounded-full px-3 py-1 text-sm font-medium"
+            :class="[
+              selectedPlugin.status === 'active'
+                ? 'bg-green-100 text-green-800'
+                : 'bg-gray-100 text-gray-800',
+            ]"
+          >
+            {{ selectedPlugin.status === 'active' ? '已启用' : '已禁用' }}
+          </span>
+        </div>
 
-          <div v-if="selectedPlugin" class="plugin-detail">
-            <div class="mb-6 text-center">
-              <div
-                class="mx-auto mb-4 flex h-16 w-16 items-center justify-center rounded-lg"
-              >
-                <img
-                  v-if="selectedPlugin.icon"
-                  :src="selectedPlugin.icon"
-                  :alt="selectedPlugin.name"
-                  class="h-12 w-12 object-contain"
-                  @error="handleIconError"
-                />
-                <span v-else class="text-3xl">🔧</span>
-              </div>
-              <h2 class="text-xl font-bold">{{ selectedPlugin.name }}</h2>
-              <p>v{{ selectedPlugin.version }}</p>
-              <span
-                class="mt-2 inline-block rounded-full px-3 py-1 text-sm font-medium"
-                :class="[selectedPlugin.status === 'active' ? '' : '']"
-              >
-                {{ selectedPlugin.status === 'active' ? '已启用' : '已禁用' }}
-              </span>
+        <div class="space-y-4">
+          <div class="detail-item">
+            <label class="detail-label">描述</label>
+            <div class="detail-value">
+              {{ selectedPlugin.description || '暂无描述' }}
             </div>
-
-            <div class="space-y-4">
-              <div class="detail-item">
-                <label class="detail-label">描述</label>
-                <div class="detail-value">
-                  {{ selectedPlugin.description || '暂无描述' }}
-                </div>
-              </div>
-              <div class="detail-item">
-                <label class="detail-label">作者</label>
-                <div class="detail-value">{{ selectedPlugin.author }}</div>
-              </div>
-              <div class="detail-item">
-                <label class="detail-label">分类</label>
-                <div class="detail-value">
-                  {{ getCategoryDisplayName(selectedPlugin.category) }}
-                </div>
-              </div>
-              <div class="detail-item">
-                <label class="detail-label">所属库</label>
-                <div class="detail-value">
-                  {{
-                    selectedPlugin.libraryName ||
-                    selectedPlugin.libraryId ||
-                    '未知'
-                  }}
-                </div>
-              </div>
-              <div class="detail-item">
-                <label class="detail-label">依赖数量</label>
-                <div class="detail-value">
-                  {{ selectedPlugin.dependencies.length }} 个
-                </div>
-              </div>
-              <div class="detail-item">
-                <label class="detail-label">入口文件</label>
-                <div class="detail-value">{{ selectedPlugin.main }}</div>
-              </div>
-              <div class="detail-item">
-                <label class="detail-label">安装时间</label>
-                <div class="detail-value">
-                  {{ formatDate(selectedPlugin.createdAt) }}
-                </div>
-              </div>
-              <div class="detail-item">
-                <label class="detail-label">更新时间</label>
-                <div class="detail-value">
-                  {{ formatDate(selectedPlugin.updatedAt) }}
-                </div>
-              </div>
+          </div>
+          <div class="detail-item">
+            <label class="detail-label">作者</label>
+            <div class="detail-value">{{ selectedPlugin.author }}</div>
+          </div>
+          <div class="detail-item">
+            <label class="detail-label">分类</label>
+            <div class="detail-value">
+              {{ getCategoryDisplayName(selectedPlugin.category) }}
             </div>
-
-            <div
-              v-if="selectedPlugin.tags && selectedPlugin.tags.length > 0"
-              class="mt-6"
-            >
-              <h4 class="mb-2 font-semibold">标签</h4>
-              <div class="flex flex-wrap gap-2">
-                <span
-                  v-for="tag in selectedPlugin.tags"
-                  :key="tag"
-                  class="rounded px-2 py-1 text-xs"
-                >
-                  {{ tag }}
-                </span>
-              </div>
+          </div>
+          <div class="detail-item">
+            <label class="detail-label">所属库</label>
+            <div class="detail-value">
+              {{
+                selectedPlugin.libraryName || selectedPlugin.libraryId || '未知'
+              }}
             </div>
-
-            <div v-if="selectedPlugin.dependencies.length > 0" class="mt-6">
-              <h4 class="mb-2 font-semibold">依赖项</h4>
-              <div class="space-y-1">
-                <span
-                  v-for="dep in selectedPlugin.dependencies"
-                  :key="dep"
-                  class="block rounded px-2 py-1 text-xs"
-                >
-                  {{ dep }}
-                </span>
-              </div>
+          </div>
+          <div class="detail-item">
+            <label class="detail-label">依赖数量</label>
+            <div class="detail-value">
+              {{ selectedPlugin.dependencies.length }} 个
             </div>
-
-            <div class="mt-6 flex gap-2">
-              <button
-                type="button"
-                :disabled="!selectedPlugin.configurable"
-                @click="configurePlugin(selectedPlugin)"
-                class="flex-1 rounded px-4 py-2 text-white hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:cursor-not-allowed disabled:opacity-50"
-              >
-                配置插件
-              </button>
-              <button
-                type="button"
-                @click="
-                  togglePlugin(
-                    selectedPlugin,
-                    selectedPlugin.status !== 'active',
-                  )
-                "
-                class="rounded px-4 py-2 text-white hover:bg-gray-700 focus:outline-none focus:ring-2 focus:ring-gray-500"
-              >
-                {{ selectedPlugin.status === 'active' ? '禁用' : '启用' }}
-              </button>
+          </div>
+          <div class="detail-item">
+            <label class="detail-label">入口文件</label>
+            <div class="detail-value">{{ selectedPlugin.main }}</div>
+          </div>
+          <div class="detail-item">
+            <label class="detail-label">安装时间</label>
+            <div class="detail-value">
+              {{ formatDate(selectedPlugin.createdAt) }}
+            </div>
+          </div>
+          <div class="detail-item">
+            <label class="detail-label">更新时间</label>
+            <div class="detail-value">
+              {{ formatDate(selectedPlugin.updatedAt) }}
             </div>
           </div>
         </div>
+
+        <div
+          v-if="selectedPlugin.tags && selectedPlugin.tags.length > 0"
+          class="mt-6"
+        >
+          <h4 class="mb-2 font-semibold">标签</h4>
+          <div class="flex flex-wrap gap-2">
+            <span
+              v-for="tag in selectedPlugin.tags"
+              :key="tag"
+              class="rounded bg-blue-100 px-2 py-1 text-xs text-blue-800"
+            >
+              {{ tag }}
+            </span>
+          </div>
+        </div>
+
+        <div v-if="selectedPlugin.dependencies.length > 0" class="mt-6">
+          <h4 class="mb-2 font-semibold">依赖项</h4>
+          <div class="space-y-1">
+            <span
+              v-for="dep in selectedPlugin.dependencies"
+              :key="dep"
+              class="block rounded bg-gray-100 px-2 py-1 text-xs text-gray-700"
+            >
+              {{ dep }}
+            </span>
+          </div>
+        </div>
+
+        <div class="mt-6 flex gap-2">
+          <button
+            type="button"
+            :disabled="!selectedPlugin.configurable"
+            @click="configurePlugin(selectedPlugin)"
+            class="flex-1 rounded bg-blue-600 px-4 py-2 text-white hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:cursor-not-allowed disabled:opacity-50"
+          >
+            配置插件
+          </button>
+          <button
+            type="button"
+            @click="
+              togglePlugin(selectedPlugin, selectedPlugin.status !== 'active')
+            "
+            class="rounded bg-gray-600 px-4 py-2 text-white hover:bg-gray-700 focus:outline-none focus:ring-2 focus:ring-gray-500"
+          >
+            {{ selectedPlugin.status === 'active' ? '禁用' : '启用' }}
+          </button>
+        </div>
       </div>
-    </div>
+    </PluginDetailDrawer>
 
     <!-- 插件配置对话框 -->
     <div
@@ -983,11 +1024,15 @@ onMounted(() => {
           </h3>
 
           <div v-if="configuringPlugin" class="config-editor">
-            <MonacoEditor
-              v-model="pluginConfig"
-              language="json"
-              :height="400"
-            />
+            <!-- 使用 JSON 查看器替代 Monaco 编辑器 -->
+            <div class="mb-4">
+              <h4 class="mb-2 text-sm font-semibold">配置预览</h4>
+              <div class="max-h-96 overflow-auto rounded border p-4">
+                <pre class="whitespace-pre-wrap text-sm">{{
+                  pluginConfig
+                }}</pre>
+              </div>
+            </div>
           </div>
 
           <div class="flex justify-end space-x-3 pt-4">
@@ -1012,7 +1057,7 @@ onMounted(() => {
     </div>
 
     <!-- VbenModal 安装插件对话框 -->
-    <Modal
+    <VbenModal
       :loading="loading"
       :confirm-loading="loading"
       @confirm="handleInstallOk"
@@ -1080,287 +1125,55 @@ onMounted(() => {
           />
         </div>
       </div>
-    </Modal>
+    </VbenModal>
+
+    <!-- 全局插件操作菜单 -->
+    <div
+      v-if="activeDropdown"
+      class="fixed z-[9999] mt-1 w-32 rounded-md border border-gray-200 bg-white shadow-lg"
+      :style="dropdownStyle"
+    >
+      <button
+        @click="
+          selectedPluginForAction &&
+          handlePluginAction('update', selectedPluginForAction)
+        "
+        class="block w-full px-4 py-2 text-left text-sm text-gray-700 hover:bg-gray-100"
+      >
+        更新
+      </button>
+      <hr class="border-gray-100" />
+      <button
+        @click="
+          selectedPluginForAction &&
+          handlePluginAction('uninstall', selectedPluginForAction)
+        "
+        class="block w-full px-4 py-2 text-left text-sm text-red-600 hover:bg-red-50"
+      >
+        卸载
+      </button>
+    </div>
 
     <!-- 点击遮罩关闭下拉菜单 -->
     <div
       v-if="activeDropdown"
       @click="activeDropdown = null"
-      class="fixed inset-0 z-0"
+      class="fixed inset-0 z-[9998]"
     ></div>
   </div>
 </template>
 
 <style scoped>
-.plugin-manager {
-  padding: 24px;
-  min-height: 100vh;
-}
+@keyframes fadeInUp {
+  from {
+    opacity: 0;
+    transform: translateY(20px);
+  }
 
-/* 统计卡片样式 */
-.stats-card {
-  padding: 20px;
-  border-radius: 12px;
-  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-  color: white;
-  box-shadow: 0 4px 15px rgba(0, 0, 0, 0.1);
-  transition:
-    transform 0.2s ease,
-    box-shadow 0.2s ease;
-}
-
-.stats-card:hover {
-  transform: translateY(-2px);
-  box-shadow: 0 8px 25px rgba(0, 0, 0, 0.15);
-}
-
-.stats-card.total-plugins {
-  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-}
-
-.stats-card.active-plugins {
-  background: linear-gradient(135deg, #56ab2f 0%, #a8e6cf 100%);
-}
-
-.stats-card.inactive-plugins {
-  background: linear-gradient(135deg, #ff6b6b 0%, #ffa8a8 100%);
-}
-
-.stats-content {
-  display: flex;
-  align-items: center;
-  gap: 16px;
-}
-
-.stats-icon {
-  font-size: 24px;
-  opacity: 0.9;
-}
-
-.stats-info h3 {
-  margin: 0;
-  font-size: 14px;
-  font-weight: 500;
-  opacity: 0.9;
-}
-
-.stats-number {
-  margin: 4px 0 0 0;
-  font-size: 28px;
-  font-weight: 700;
-}
-
-/* 标签页样式 */
-.library-tabs {
-  margin-top: 24px;
-}
-
-.tab-nav {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
-  margin-bottom: 24px;
-  border-bottom: 1px solid #e5e7eb;
-  padding-bottom: 12px;
-}
-
-.tab-button {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 8px 16px;
-  border: 1px solid;
-  border-radius: 6px;
-  font-weight: 500;
-  transition: all 0.2s ease;
-  cursor: pointer;
-}
-
-.tab-button:hover {
-}
-
-.tab-button.active {
-}
-
-.tab-count {
-  background: rgba(255, 255, 255, 0.2);
-  padding: 2px 6px;
-  border-radius: 10px;
-  font-size: 12px;
-  font-weight: 600;
-}
-
-.tab-button.active .tab-count {
-  background: rgba(255, 255, 255, 0.3);
-}
-
-/* 库统计样式 */
-.library-stat {
-  padding: 16px;
-  border-radius: 8px;
-  border: 1px solid #e5e7eb;
-  text-align: center;
-  min-width: 100px;
-}
-
-.stat-title {
-  font-size: 12px;
-  font-weight: 500;
-  margin-bottom: 4px;
-}
-
-.stat-value {
-  font-size: 18px;
-  font-weight: 600;
-}
-
-/* 插件卡片样式 */
-.plugin-card {
-  border: 1px solid #e5e7eb;
-  border-radius: 12px;
-  padding: 20px;
-  height: 320px;
-  display: flex;
-  flex-direction: column;
-  transition: all 0.3s ease;
-  position: relative;
-  overflow: hidden;
-}
-
-.plugin-card:hover {
-  box-shadow: 0 8px 30px rgba(0, 0, 0, 0.12);
-  transform: translateY(-2px);
-}
-
-.plugin-card.border-green-200 {
-}
-
-.plugin-card.border-gray-200 {
-}
-
-.plugin-header {
-  border-bottom: 1px solid #f0f0f0;
-  padding-bottom: 12px;
-  margin-bottom: 12px;
-}
-
-.plugin-info {
-  border-radius: 6px;
-  padding: 12px;
-}
-
-.plugin-actions {
-  margin-top: auto;
-}
-
-.line-clamp-2 {
-  display: -webkit-box;
-  -webkit-line-clamp: 2;
-  line-clamp: 2;
-  -webkit-box-orient: vertical;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-
-/* 状态指示器 */
-.plugin-card.border-green-200::before {
-  content: '';
-  position: absolute;
-  top: 0;
-  left: 0;
-  width: 4px;
-  height: 100%;
-  background: #52c41a;
-  border-radius: 0 4px 4px 0;
-}
-
-.plugin-card.border-gray-200::before {
-  content: '';
-  position: absolute;
-  top: 0;
-  left: 0;
-  width: 4px;
-  height: 100%;
-  background: #d9d9d9;
-  border-radius: 0 4px 4px 0;
-}
-
-/* Switch 样式 */
-.switch {
-  position: relative;
-  display: inline-block;
-  width: 50px;
-  height: 24px;
-}
-
-.switch input {
-  opacity: 0;
-  width: 0;
-  height: 0;
-}
-
-.slider {
-  position: absolute;
-  cursor: pointer;
-  top: 0;
-  left: 0;
-  right: 0;
-  bottom: 0;
-  transition: 0.4s;
-  border-radius: 24px;
-}
-
-.slider:before {
-  position: absolute;
-  content: '';
-  height: 18px;
-  width: 18px;
-  left: 3px;
-  bottom: 3px;
-  background-color: var(--ant-color-bg-base, white);
-  transition: 0.4s;
-  border-radius: 50%;
-}
-
-input:checked + .slider {
-}
-
-input:checked + .slider:before {
-  transform: translateX(26px);
-}
-
-/* 详情面板样式 */
-.plugin-detail {
-  padding: 16px 0;
-}
-
-.detail-item {
-  padding: 12px 0;
-  border-bottom: 1px solid #f0f0f0;
-}
-
-.detail-item:last-child {
-  border-bottom: none;
-}
-
-.detail-label {
-  display: block;
-  font-size: 14px;
-  font-weight: 600;
-  margin-bottom: 4px;
-}
-
-.detail-value {
-  font-size: 14px;
-  word-break: break-word;
-}
-
-/* 骨架屏样式 */
-.plugin-skeleton {
-  border: 1px solid #e5e7eb;
-  border-radius: 12px;
-  padding: 20px;
-  height: 320px;
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
 }
 
 /* 响应式设计 */
@@ -1389,20 +1202,287 @@ input:checked + .slider:before {
   }
 }
 
+.plugin-manager {
+  min-height: 100vh;
+  padding: 24px;
+}
+
+/* 统计卡片样式 */
+.stats-card {
+  padding: 20px;
+  color: white;
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  border-radius: 12px;
+  box-shadow: 0 4px 15px rgb(0 0 0 / 10%);
+  transition:
+    transform 0.2s ease,
+    box-shadow 0.2s ease;
+}
+
+.stats-card:hover {
+  box-shadow: 0 8px 25px rgb(0 0 0 / 15%);
+  transform: translateY(-2px);
+}
+
+.stats-card.total-plugins {
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+}
+
+.stats-card.active-plugins {
+  background: linear-gradient(135deg, #56ab2f 0%, #a8e6cf 100%);
+}
+
+.stats-card.inactive-plugins {
+  background: linear-gradient(135deg, #ff6b6b 0%, #ffa8a8 100%);
+}
+
+.stats-content {
+  display: flex;
+  gap: 16px;
+  align-items: center;
+}
+
+.stats-icon {
+  font-size: 24px;
+  opacity: 0.9;
+}
+
+.stats-info h3 {
+  margin: 0;
+  font-size: 14px;
+  font-weight: 500;
+  opacity: 0.9;
+}
+
+.stats-number {
+  margin: 4px 0 0;
+  font-size: 28px;
+  font-weight: 700;
+}
+
+/* 标签页样式 */
+.library-tabs {
+  margin-top: 24px;
+}
+
+.tab-nav {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  padding-bottom: 12px;
+  margin-bottom: 24px;
+  border-bottom: 1px solid #e5e7eb;
+}
+
+.tab-button {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  padding: 8px 16px;
+  font-weight: 500;
+  cursor: pointer;
+  border: 1px solid;
+  border-radius: 6px;
+  transition: all 0.2s ease;
+}
+
+.tab-button:hover {
+  background-color: rgb(0 0 0 / 5%);
+}
+
+.tab-button.active {
+  background-color: rgb(0 0 0 / 10%);
+}
+
+.tab-count {
+  padding: 2px 6px;
+  font-size: 12px;
+  font-weight: 600;
+  background: rgb(255 255 255 / 20%);
+  border-radius: 10px;
+}
+
+.tab-button.active .tab-count {
+  background: rgb(255 255 255 / 30%);
+}
+
+/* 库统计样式 */
+.library-stat {
+  min-width: 100px;
+  padding: 16px;
+  text-align: center;
+  border: 1px solid #e5e7eb;
+  border-radius: 8px;
+}
+
+.stat-title {
+  margin-bottom: 4px;
+  font-size: 12px;
+  font-weight: 500;
+}
+
+.stat-value {
+  font-size: 18px;
+  font-weight: 600;
+}
+
+/* 插件卡片样式 */
+.plugin-card {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  height: 320px;
+  padding: 20px;
+  overflow: hidden;
+  background-color: #ffffff;
+  border: 1px solid #e5e7eb;
+  border-radius: 12px;
+  transition: all 0.3s ease;
+}
+
+.plugin-card:hover {
+  background-color: #f8fafc;
+  box-shadow: 0 8px 30px rgb(0 0 0 / 12%);
+  transform: translateY(-2px);
+}
+
+.plugin-card.border-green-200 {
+  background-color: #f0f9ff;
+  border-color: #d9f7be;
+}
+
+.plugin-card.border-gray-200 {
+  background-color: #fafafa;
+  border-color: #f0f0f0;
+}
+
+.plugin-header {
+  padding-bottom: 12px;
+  margin-bottom: 12px;
+  border-bottom: 1px solid #f0f0f0;
+}
+
+.plugin-info {
+  padding: 12px;
+  background-color: rgb(248 250 252 / 0.5);
+  border-radius: 6px;
+}
+
+.plugin-actions {
+  margin-top: auto;
+}
+
+.line-clamp-2 {
+  display: -webkit-box;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  -webkit-line-clamp: 2;
+  line-clamp: 2;
+  -webkit-box-orient: vertical;
+}
+
+/* 状态指示器 */
+.plugin-card.border-green-200::before {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 4px;
+  height: 100%;
+  content: '';
+  background: #52c41a;
+  border-radius: 0 4px 4px 0;
+}
+
+.plugin-card.border-gray-200::before {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 4px;
+  height: 100%;
+  content: '';
+  background: #d9d9d9;
+  border-radius: 0 4px 4px 0;
+}
+
+/* Switch 样式 */
+.switch {
+  position: relative;
+  display: inline-block;
+  width: 50px;
+  height: 24px;
+}
+
+.switch input {
+  width: 0;
+  height: 0;
+  opacity: 0;
+}
+
+.slider {
+  position: absolute;
+  inset: 0;
+  cursor: pointer;
+  border-radius: 24px;
+  transition: 0.4s;
+}
+
+.slider::before {
+  position: absolute;
+  bottom: 3px;
+  left: 3px;
+  width: 18px;
+  height: 18px;
+  content: '';
+  background-color: var(--ant-color-bg-base, white);
+  border-radius: 50%;
+  transition: 0.4s;
+}
+
+input:checked + .slider {
+  background-color: #52c41a;
+}
+
+input:checked + .slider::before {
+  transform: translateX(26px);
+}
+
+/* 详情面板样式 */
+.plugin-detail {
+  padding: 16px 0;
+}
+
+.detail-item {
+  padding: 12px 0;
+  border-bottom: 1px solid #f0f0f0;
+}
+
+.detail-item:last-child {
+  border-bottom: none;
+}
+
+.detail-label {
+  display: block;
+  margin-bottom: 4px;
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.detail-value {
+  font-size: 14px;
+  word-break: break-word;
+}
+
+/* 骨架屏样式 */
+.plugin-skeleton {
+  height: 320px;
+  padding: 20px;
+  border: 1px solid #e5e7eb;
+  border-radius: 12px;
+}
+
 /* 动画效果 */
 .plugin-card {
   animation: fadeInUp 0.3s ease-out;
-}
-
-@keyframes fadeInUp {
-  from {
-    opacity: 0;
-    transform: translateY(20px);
-  }
-  to {
-    opacity: 1;
-    transform: translateY(0);
-  }
 }
 
 /* 下拉菜单样式 */

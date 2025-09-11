@@ -43,16 +43,6 @@ const routes: RouteRecordRaw[] = [
         },
       },
       {
-        name: 'MiraPluginRoutes',
-        path: '/mira/plugin-routes',
-        component: () => import('#/views/mira/plugin-routes/index.vue'),
-        meta: {
-          roles: ['super', 'admin'], // 需要超级管理员或管理员角色
-          icon: 'lucide:route',
-          title: '插件路由',
-        },
-      },
-      {
         name: 'MiraAdmin',
         path: '/mira/admin',
         component: () => import('#/views/mira/admin/index.vue'),
@@ -80,6 +70,16 @@ const routes: RouteRecordRaw[] = [
           roles: ['super', 'admin'], // 需要超级管理员或管理员角色
           icon: 'lucide:smartphone',
           title: '设备管理',
+        },
+      },
+      {
+        name: 'MiraFileUpload',
+        path: '/mira/file-upload',
+        component: () => import('#/views/mira/file-upload/index.vue'),
+        meta: {
+          roles: ['super', 'admin'], // 需要超级管理员或管理员角色
+          icon: 'lucide:upload',
+          title: '文件上传',
         },
       },
     ],
